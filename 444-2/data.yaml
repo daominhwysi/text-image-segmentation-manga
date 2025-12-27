@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['class_0']
+
+roboflow:
+  workspace: dao-minh-uyi1j
+  project: 444-8vbul
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/dao-minh-uyi1j/444-8vbul/dataset/2
