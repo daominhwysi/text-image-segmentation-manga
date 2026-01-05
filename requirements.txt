@@ -1,3 +1,5 @@
 roboflow
 huggingface_hub
 faker
+datasets
+Pillow
