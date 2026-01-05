@@ -121,9 +121,9 @@ def generate_composited_sample(
 
     # --- 6. RESIZE TO 128x128 (NEW STEP) ---
     # We do this at the very end to preserve the original composition logic
-    final_bg = final_bg.resize((128, 128), Image.Resampling.LANCZOS)
+    final_bg = final_bg.resize((256, 256), Image.Resampling.LANCZOS)
     mask = mask.resize(
-        (128, 128), Image.Resampling.NEAREST
+        (256, 256), Image.Resampling.NEAREST
     )  # Nearest used for mask to keep it binary
 
     return final_bg, mask
@@ -135,12 +135,12 @@ def get_random_word_count(mu, sigma):
 
 
 class DatasetGenerator:
-    def __init__(self, dataset_root, output_dir):
+    def __init__(self, dataset_root, font_dir, output_dir):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.fake = Faker()
         self.train_fonts, self.test_fonts = initialize_font_samplers(
-            "fonts", split_ratio=0.8
+            font_dir, split_ratio=0.8
         )
 
     def _prepare_dirs(self):
@@ -175,7 +175,7 @@ class DatasetGenerator:
                 dataset_root=self.dataset_root,
                 text=text,
                 font_path=font_path,
-                FIXED_WIDTH=random.choice([128, 192]),
+                FIXED_WIDTH=256,
             )
 
             if result is None:
@@ -191,9 +191,12 @@ class DatasetGenerator:
 
 
 if __name__ == "__main__":
-    SOURCE_DATA = "444-2/train"
+    SOURCE_DATA = "resource/444-2/train"
+    FONT_DIR = "resource/fonts"
     EXPORT_DEST = "synthetic_dataset"
     TOTAL_SAMPLES = 30000
 
-    generator = DatasetGenerator(SOURCE_DATA, EXPORT_DEST)
+    generator = DatasetGenerator(
+        dataset_root=SOURCE_DATA, font_dir=FONT_DIR, output_dir=EXPORT_DEST
+    )
     generator.generate(n_samples=TOTAL_SAMPLES)
