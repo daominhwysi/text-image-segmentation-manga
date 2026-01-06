@@ -7,6 +7,7 @@ import numpy as np
 from src.bg_manager import get_random_non_overlapping_roi
 from PIL import Image
 from src.text_render import generate_text_image
+from src.augment_text import augment_output_image
 
 
 def get_random_rgb_alpha():
@@ -122,10 +123,11 @@ def generate_composited_sample(
     # --- 6. RESIZE TO 128x128 (NEW STEP) ---
     # We do this at the very end to preserve the original composition logic
     final_bg = final_bg.resize((256, 256), Image.Resampling.LANCZOS)
+
     mask = mask.resize(
         (256, 256), Image.Resampling.NEAREST
     )  # Nearest used for mask to keep it binary
-
+    final_bg = augment_output_image(final_bg)
     return final_bg, mask
 
 
@@ -149,6 +151,83 @@ class DatasetGenerator:
                 path = os.path.join(self.output_dir, split, sub)
                 os.makedirs(path, exist_ok=True)
 
+    def get_sentence(self):
+        word_count = get_random_word_count(mu=6.83, sigma=6.47)
+        words = self.fake.words(nb=word_count)
+        if not words:
+            return ""
+
+        # 1. Randomly wrap words in "Odd" characters (Lower probability)
+        for i in range(len(words)):
+            prob = random.random()
+            if prob < 0.02:  # 2% chance for "The Odd Ones"
+                pair = random.choice(
+                    [
+                        ("(", ")"),
+                        ("[", "]"),
+                        ("{", "}"),
+                        ("<", ">"),
+                        ('"', '"'),
+                        ("'", "'"),
+                    ]
+                )
+                words[i] = f"{pair[0]}{words[i]}{pair[1]}"
+            elif prob < 0.04:  # 2% chance for "Prefix/Suffix Noise"
+                char = random.choice(
+                    ["#", "@", "~", "-", "+", "=", "%", "^", "&", "*", "|"]
+                )
+                words[i] = (
+                    f"{char}{words[i]}"
+                    if random.getrandbits(1)
+                    else f"{words[i]}{char}"
+                )
+
+        text = " ".join(words)
+
+        # 2. Weighted Terminators
+        # We use a list of weights to ensure standard terminators remain dominant
+        # while "Odd" ones show up just enough for the AI to learn them.
+        terminators = [
+            ".",
+            "!",
+            "?",
+            "-",
+            "...",  # Standard (High weight)
+            ":",
+            ";",  # Common (Medium weight)
+            " #",
+            " @",
+            " %",
+            " -",  # Odd (Low weight)
+            " >",
+            " ]",
+            " }",
+            " |",  # Rare (Very low weight)
+        ]
+        weights = [
+            12,
+            12,
+            12,
+            12,
+            12,  # Standard (High)
+            8,
+            8,  # Common (Medium)
+            5,
+            5,
+            5,
+            5,  # Odd (Low)
+            1,
+            1,
+            1,
+            1,  # Rare (Very low)
+        ]
+        # Total Sum: 100
+
+        chosen_terminator = random.choices(terminators, weights=weights)[0]
+
+        # Capitalize for a standard starting look, then add the tail
+        return text.capitalize() + chosen_terminator
+
     def generate(self, n_samples=100, train_ratio=0.8):
         self._prepare_dirs()
         n_train = int(n_samples * train_ratio)
@@ -163,12 +242,10 @@ class DatasetGenerator:
                 split = "test"
                 font_sampler = self.test_fonts
 
-            word_count = get_random_word_count(mu=6.83, sigma=6.47)
-            text = " ".join(self.fake.words(nb=word_count))
             font_path = font_sampler.get_random_font()
             if not font_path:
                 continue
-
+            text = self.get_sentence()
             # FIXED_WIDTH here still influences the "origin logic" aspect ratio,
             # but the output is guaranteed 128x128 by the function above.
             result = generate_composited_sample(
@@ -194,7 +271,7 @@ if __name__ == "__main__":
     SOURCE_DATA = "resource/444-2/train"
     FONT_DIR = "resource/fonts"
     EXPORT_DEST = "synthetic_dataset"
-    TOTAL_SAMPLES = 30000
+    TOTAL_SAMPLES = 100000
 
     generator = DatasetGenerator(
         dataset_root=SOURCE_DATA, font_dir=FONT_DIR, output_dir=EXPORT_DEST
