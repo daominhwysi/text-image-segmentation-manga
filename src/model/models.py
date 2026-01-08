@@ -5,6 +5,7 @@ from transformers import SegformerForImageClassification
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 
 
 class DecoderBlock(nn.Module):
@@ -246,3 +247,288 @@ class Unet_B1(nn.Module):
             return main_out, out3, out2, out1
         else:
             return main_out
+
+
+class Unet_MobileNet_small(nn.Module):
+    def __init__(self, in_channels=3, num_classes=2):
+        super(Unet_MobileNet_small, self).__init__()
+
+        # Load MobileNetV3 Small as the backbone
+        # We use .features to get the convolutional layers
+        backbone = models.mobilenet_v3_small(weights="DEFAULT").features
+
+        # Encoder Stages (Extracting features at different resolutions)
+        # s1: 1/2 size (16 channels)
+        self.layer1 = backbone[0:1]
+        # s2: 1/4 size (16 channels)
+        self.layer2 = backbone[1:2]
+        # s3: 1/8 size (24 channels)
+        self.layer3 = backbone[2:4]
+        # s4: 1/16 size (48 channels)
+        self.layer4 = backbone[4:9]
+        # s5: 1/32 size (576 channels) - Bottleneck
+        self.layer5 = backbone[9:13]
+
+        # ASPP on the bottleneck
+        self.aspp = ASPP(in_channels=576, out_channels=256)
+
+        # Decoder Layers
+        # de1: 1/32 -> 1/16 (Input: 256, Skip: 48)
+        self.de_layer1 = DecoderBlock(
+            in_channels=256, skip_channels=48, out_channels=128
+        )
+
+        # de2: 1/16 -> 1/8 (Input: 128, Skip: 24)
+        self.de_layer2 = DecoderBlock(
+            in_channels=128, skip_channels=24, out_channels=64
+        )
+
+        # de3: 1/8 -> 1/4 (Input: 64, Skip: 16)
+        self.de_layer3 = DecoderBlock(in_channels=64, skip_channels=16, out_channels=32)
+
+        # de4: 1/4 -> 1/2 (Input: 32, Skip: 16)
+        self.de_layer4 = DecoderBlock(in_channels=32, skip_channels=16, out_channels=16)
+
+        # Final upsampling to original size (1/2 -> 1/1)
+        self.final_up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, num_classes, kernel_size=1),
+        )
+
+        # Auxiliary heads for Deep Supervision (matching your Unet_B0/B1 style)
+        self.head1 = nn.Conv2d(128, num_classes, kernel_size=1)
+        self.head2 = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.head3 = nn.Conv2d(32, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        # Encoder
+        s1 = self.layer1(x)  # 1/2
+        s2 = self.layer2(s1)  # 1/4
+        s3 = self.layer3(s2)  # 1/8
+        s4 = self.layer4(s3)  # 1/16
+        s5 = self.layer5(s4)  # 1/32 (Bottleneck)
+
+        # Bridge
+        bottleneck = self.aspp(s5)
+
+        # Decoder with skip connections
+        d0 = self.de_layer1(bottleneck, s4)  # 1/16
+        d1 = self.de_layer2(d0, s3)  # 1/8
+        d2 = self.de_layer3(d1, s2)  # 1/4
+        d3 = self.de_layer4(d2, s1)  # 1/2
+
+        # Final output
+        main_out = self.final_up(d3)  # 1/1
+
+        if self.training:
+            # Deep Supervision outputs
+            out1 = F.interpolate(
+                self.head1(d0), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out2 = F.interpolate(
+                self.head2(d1), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out3 = F.interpolate(
+                self.head3(d2), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            return main_out, out3, out2, out1
+        else:
+            return main_out
+
+
+class Unet_MobileNet_Large(nn.Module):
+    def __init__(self, in_channels=3, num_classes=2):
+        super(Unet_MobileNet_small, self).__init__()
+
+        # Load MobileNetV3 Small as the backbone
+        # We use .features to get the convolutional layers
+        backbone = models.mobilenet_v3_small(weights="DEFAULT").features
+
+        # Encoder Stages (Extracting features at different resolutions)
+        # s1: 1/2 size (16 channels)
+        self.layer1 = backbone[0:1]
+        # s2: 1/4 size (16 channels)
+        self.layer2 = backbone[1:2]
+        # s3: 1/8 size (24 channels)
+        self.layer3 = backbone[2:4]
+        # s4: 1/16 size (48 channels)
+        self.layer4 = backbone[4:9]
+        # s5: 1/32 size (576 channels) - Bottleneck
+        self.layer5 = backbone[9:13]
+
+        # ASPP on the bottleneck
+        self.aspp = ASPP(in_channels=576, out_channels=256)
+
+        # Decoder Layers
+        # de1: 1/32 -> 1/16 (Input: 256, Skip: 48)
+        self.de_layer1 = DecoderBlock(
+            in_channels=256, skip_channels=48, out_channels=128
+        )
+
+        # de2: 1/16 -> 1/8 (Input: 128, Skip: 24)
+        self.de_layer2 = DecoderBlock(
+            in_channels=128, skip_channels=24, out_channels=64
+        )
+
+        # de3: 1/8 -> 1/4 (Input: 64, Skip: 16)
+        self.de_layer3 = DecoderBlock(in_channels=64, skip_channels=16, out_channels=32)
+
+        # de4: 1/4 -> 1/2 (Input: 32, Skip: 16)
+        self.de_layer4 = DecoderBlock(in_channels=32, skip_channels=16, out_channels=16)
+
+        # Final upsampling to original size (1/2 -> 1/1)
+        self.final_up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, num_classes, kernel_size=1),
+        )
+
+        # Auxiliary heads for Deep Supervision (matching your Unet_B0/B1 style)
+        self.head1 = nn.Conv2d(128, num_classes, kernel_size=1)
+        self.head2 = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.head3 = nn.Conv2d(32, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        # Encoder
+        s1 = self.layer1(x)  # 1/2
+        s2 = self.layer2(s1)  # 1/4
+        s3 = self.layer3(s2)  # 1/8
+        s4 = self.layer4(s3)  # 1/16
+        s5 = self.layer5(s4)  # 1/32 (Bottleneck)
+
+        # Bridge
+        bottleneck = self.aspp(s5)
+
+        # Decoder with skip connections
+        d0 = self.de_layer1(bottleneck, s4)  # 1/16
+        d1 = self.de_layer2(d0, s3)  # 1/8
+        d2 = self.de_layer3(d1, s2)  # 1/4
+        d3 = self.de_layer4(d2, s1)  # 1/2
+
+        # Final output
+        main_out = self.final_up(d3)  # 1/1
+
+        if self.training:
+            # Deep Supervision outputs
+            out1 = F.interpolate(
+                self.head1(d0), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out2 = F.interpolate(
+                self.head2(d1), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out3 = F.interpolate(
+                self.head3(d2), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            return main_out, out3, out2, out1
+        else:
+            return main_out
+
+
+class Unet_MobileNetLarge(nn.Module):
+    def __init__(self, in_channels=3, num_classes=2):
+        super(Unet_MobileNetLarge, self).__init__()
+
+        # Load MobileNetV3 Large backbone
+        backbone = models.mobilenet_v3_large(weights="DEFAULT").features
+
+        # --- Encoder Mapping ---
+        # Layer 0-1: Output 1/2 size, 16 channels
+        self.layer1 = backbone[0:2]
+        # Layer 2-3: Output 1/4 size, 24 channels
+        self.layer2 = backbone[2:4]
+        # Layer 4-6: Output 1/8 size, 40 channels
+        self.layer3 = backbone[4:7]
+        # Layer 7-12: Output 1/16 size, 80 channels
+        self.layer4 = backbone[7:13]
+        # Layer 13-16: Output 1/32 size, 960 channels (Bottleneck)
+        self.layer5 = backbone[13:17]
+
+        # ASPP on the high-level features (960 channels)
+        self.aspp = ASPP(in_channels=960, out_channels=512)
+
+        # --- Decoder Layers ---
+        # de1: 1/32 -> 1/16 (Input: 512, Skip: 80)
+        self.de_layer1 = DecoderBlock(
+            in_channels=512, skip_channels=112, out_channels=256
+        )
+
+        # de2: 1/16 -> 1/8 (Input: 256, Skip: 40)
+        self.de_layer2 = DecoderBlock(
+            in_channels=256, skip_channels=40, out_channels=128
+        )
+
+        # de3: 1/8 -> 1/4 (Input: 128, Skip: 24)
+        self.de_layer3 = DecoderBlock(
+            in_channels=128, skip_channels=24, out_channels=64
+        )
+
+        # de4: 1/4 -> 1/2 (Input: 64, Skip: 16)
+        self.de_layer4 = DecoderBlock(in_channels=64, skip_channels=16, out_channels=32)
+
+        # Final upsampling: 1/2 -> 1/1
+        self.final_up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 16, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, num_classes, kernel_size=1),
+        )
+
+        # Auxiliary heads for training (Deep Supervision)
+        self.head1 = nn.Conv2d(256, num_classes, kernel_size=1)
+        self.head2 = nn.Conv2d(128, num_classes, kernel_size=1)
+        self.head3 = nn.Conv2d(64, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        # Encoder
+        s1 = self.layer1(x)  # 1/2 (16 ch)
+        s2 = self.layer2(s1)  # 1/4 (24 ch)
+        s3 = self.layer3(s2)  # 1/8 (40 ch)
+        s4 = self.layer4(s3)  # 1/16 (80 ch)
+        s5 = self.layer5(s4)  # 1/32 (960 ch)
+        # Bridge
+        bottleneck = self.aspp(s5)
+
+        # Decoder
+        d0 = self.de_layer1(bottleneck, s4)  # 1/16
+
+        d1 = self.de_layer2(d0, s3)  # 1/8
+
+        d2 = self.de_layer3(d1, s2)  # 1/4
+        d3 = self.de_layer4(d2, s1)  # 1/2
+
+        main_out = self.final_up(d3)  # 1/1
+
+        if self.training:
+            # Deep Supervision outputs
+            out1 = F.interpolate(
+                self.head1(d0), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out2 = F.interpolate(
+                self.head2(d1), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            out3 = F.interpolate(
+                self.head3(d2), size=x.shape[-2:], mode="bilinear", align_corners=True
+            )
+            return main_out, out3, out2, out1
+        else:
+            return main_out
+
+
+if __name__ == "__main__":
+    # Test the model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Unet_MobileNetLarge(in_channels=3, num_classes=2).to(device)
+    dummy_input = torch.randn((2, 3, 256, 256)).to(device)
+
+    model.train()
+    outputs = model(dummy_input)
+    print(f"Training mode output count: {len(outputs)}")
+    print(f"Main output shape: {outputs[0].shape}")
+
+    model.eval()
+    with torch.no_grad():
+        output = model(dummy_input)
+        print(f"Eval mode output shape: {output.shape}")
