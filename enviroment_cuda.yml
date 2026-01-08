@@ -1,0 +1,24 @@
+name: text-image-seg
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pandas
+  - matplotlib
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  - pip
+  - pip:
+      - roboflow
+      - huggingface_hub
+      - faker
+      - torchmetrics
+      - datasets
+      - Pillow
+      - albumentations
+      - numpy

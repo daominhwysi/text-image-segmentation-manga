@@ -2,12 +2,12 @@ import os
 import random
 from tqdm import tqdm
 from faker import Faker
-from src.utils import initialize_font_samplers
+from src.data.utils import initialize_font_samplers
 import numpy as np
-from src.bg_manager import get_random_non_overlapping_roi
+from src.data.bg_manager import get_random_non_overlapping_roi
 from PIL import Image
-from src.text_render import generate_text_image
-from src.augment_text import augment_output_image
+from src.data.text_render import generate_text_image
+from src.data.augment_text import augment_output_image
 
 
 def get_random_rgb_alpha():

@@ -2,13 +2,19 @@ name: text-image-seg
 channels:
   - conda-forge
   - defaults
+  - pytorch
 dependencies:
   - python=3.10
   - pandas
   - matplotlib
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cpuonly
   - pip:
       - roboflow
       - huggingface_hub
+      - torchmetrics
       - faker
       - datasets
       - Pillow

@@ -2,7 +2,7 @@ import math
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-from src.augment_text import augment_text_image
+from src.data.augment_text import augment_text_image
 
 
 def crop_tight_with_contours(pil_img: Image.Image) -> Image.Image:

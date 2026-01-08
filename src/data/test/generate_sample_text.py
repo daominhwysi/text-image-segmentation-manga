@@ -1,7 +1,7 @@
-from src.text_render import generate_text_image, crop_tight_with_contours
-from src.generator import DatasetGenerator
-from src.utils import initialize_font_samplers
-from src.augment_text import augment_text_image
+from src.data.text_render import generate_text_image, crop_tight_with_contours
+from src.data.generator import DatasetGenerator
+from src.data.utils import initialize_font_samplers
+from src.data.augment_text import augment_text_image
 
 FONT_DIR = "resource/fonts"
 DATASET_ROOT = "resource/444-2"
