@@ -21,3 +21,5 @@ dependencies:
       - albumentations
       - numpy
       - transformers
+      - openocr-python
+      - onnxruntime
