@@ -2,8 +2,8 @@ import os
 import cv2
 import numpy as np
 import time
-from src.data.v2.openocr.det import OpenOCRDetector
-from src.data.v2.openocr.rec import StandaloneRecognizer
+from src.data.v2.openocr.det_infer import OpenOCRDetector
+from src.data.v2.openocr.rec_infer import StandaloneRecognizer
 
 def get_rotate_crop_image(img, points):
     """
@@ -53,17 +53,20 @@ class OpenOCRPipeline:
         self.detector = OpenOCRDetector(det_model_path)
         self.recognizer = StandaloneRecognizer(rec_model_path, dict_path)
 
-    def __call__(self, img_path):
-        # 1. Read image
-        img = cv2.imread(img_path)
+    def __call__(self, input_data):
+        # 1. Read/Prepare image
+        if isinstance(input_data, str):
+            img = cv2.imread(input_data)
+        else:
+            img = input_data
+
         if img is None:
-            print(f"Error: Could not read image at {img_path}")
+            print(f"Error: Could not read image or image is None")
             return None
 
         # 2. Detection
-        # The detector internally reads the image again from path, which is okay for this standalone script.
         det_start = time.time()
-        det_res = self.detector(img_path)
+        det_res = self.detector(img)
         det_elapse = time.time() - det_start
 
         boxes = det_res['boxes']

@@ -127,8 +127,12 @@ class OpenOCRDetector:
         shape_list = np.array([[h, w, new_h/h, new_w/w]], dtype=np.float32)
         return img_data, shape_list
 
-    def __call__(self, img_path):
-        img = cv2.imread(img_path)
+    def __call__(self, input_data):
+        if isinstance(input_data, str):
+            img = cv2.imread(input_data)
+        else:
+            img = input_data
+
         if img is None: return None
 
         blob, shape_list = self.preprocess(img)
