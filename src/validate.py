@@ -8,11 +8,11 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 
-from src.model.models import Unet_B1
+from src.segment.models import Unet_MobileNetV4
 
 def validate():
     # Configuration
-    MODEL_PATH = "checkpoints/text_seg_unet_b1.pth"
+    MODEL_PATH = "checkpoints/best_manga_unet.pth"
     IMAGE_DIR = "representative_sample_folder"
     OUTPUT_DIR = "visualization"
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -21,7 +21,7 @@ def validate():
 
     # 1. Load Model
     print(f"Loading model from {MODEL_PATH}...")
-    model = Unet_B1(in_channels=3, num_classes=2)
+    model = Unet_MobileNetV4(num_classes=2)
     state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
     model.load_state_dict(state_dict)
     model.to(DEVICE)

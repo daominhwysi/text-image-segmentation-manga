@@ -16,7 +16,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import timm
 from torchmetrics.classification import MulticlassJaccardIndex
-from src.models import Unet_EfficientViT_B2, Unet_MobileNetV4, Unet_YOLO, Unet_YOLO_Medium
+from src.segment.models import Unet_EfficientViT_B2, Unet_MobileNetV4, Unet_YOLO, Unet_YOLO_Medium
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMG_SIZE = 256

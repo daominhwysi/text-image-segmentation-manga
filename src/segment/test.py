@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from src.models import Unet_MobileNetV4 # Ensure this matches your file structure
+from src.segment.models import Unet_MobileNetV4 # Ensure this matches your file structure
 
 # ==========================================
 # 1. CONFIGURATION
