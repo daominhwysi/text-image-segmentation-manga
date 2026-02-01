@@ -28,4 +28,4 @@ dataset = DatasetDict({"train": create_split("train"), "test": create_split("tes
 
 # 3. Push to Hub
 # Replace 'your-username/your-dataset-name' with your info
-dataset.push_to_hub("Daominhwysi/text-seg-manga-256")
+dataset.push_to_hub("Daominhwysi/text-manga-256")

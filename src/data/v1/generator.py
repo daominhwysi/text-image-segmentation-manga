@@ -2,12 +2,13 @@ import os
 import random
 from tqdm import tqdm
 from faker import Faker
-from src.data.utils import initialize_font_samplers
+from src.data.v1.utils import initialize_font_samplers, check_font_chars_support
 import numpy as np
-from src.data.bg_manager import get_random_non_overlapping_roi
-from PIL import Image
-from src.data.text_render import generate_text_image
-from src.data.augment_text import augment_output_image
+from src.data.v1.bg_manager import get_random_non_overlapping_roi
+from PIL import Image, ImageDraw
+from src.data.v1.text_render import generate_text_image
+from src.data.v1.augment_text import augment_output_image
+from src.data.openocr.det_infer import OpenOCRDetector
 
 
 def get_random_rgb_alpha():
@@ -33,11 +34,71 @@ def get_avg_brightness(roi_np):
     )
 
 
-def generate_composited_sample(
-    dataset_root: str, text: str, font_path: str, FIXED_WIDTH=320
+def add_random_noise_to_bg(
+    bg_img: Image.Image, is_contrast_mode: bool, avg_brightness: float
 ):
-    # --- 1. DETERMINE MODE (50% Contrast vs 50% Random) ---
-    is_contrast_mode = random.random() < 0.5
+    """Draws random lines and Bezier curves on the background image."""
+    draw = ImageDraw.Draw(bg_img)
+    w, h = bg_img.size
+
+    def get_noise_color():
+        if is_contrast_mode:
+            # Usually try to contrast with background
+            is_bg_light = avg_brightness > 127.5
+            if random.random() < 0.8:
+                return get_natural_color(is_white=not is_bg_light)
+            else:
+                return get_natural_color(is_white=is_bg_light)
+        else:
+            return get_random_rgb_alpha()
+
+    # Random straight lines
+    num_lines = random.randint(0, 10)
+    for _ in range(num_lines):
+        p1 = (random.randint(0, w), random.randint(0, h))
+        p2 = (random.randint(0, w), random.randint(0, h))
+        color = get_noise_color()
+        width = random.randint(1, 4)
+        draw.line([p1, p2], fill=color, width=width)
+
+    # Random Bezier curves
+    num_curves = random.randint(0, 10)
+    for _ in range(num_curves):
+        p0 = (random.randint(0, w), random.randint(0, h))
+        p1 = (random.randint(0, w), random.randint(0, h))
+        p2 = (random.randint(0, w), random.randint(0, h))
+        p3 = (random.randint(0, w), random.randint(0, h))
+
+        # Approximate cubic Bezier
+        steps = 20
+        points = []
+        for t_val in np.linspace(0, 1, steps):
+            x = (
+                (1 - t_val) ** 3 * p0[0]
+                + 3 * (1 - t_val) ** 2 * t_val * p1[0]
+                + 3 * (1 - t_val) * t_val**2 * p2[0]
+                + t_val**3 * p3[0]
+            )
+            y = (
+                (1 - t_val) ** 3 * p0[1]
+                + 3 * (1 - t_val) ** 2 * t_val * p1[1]
+                + 3 * (1 - t_val) * t_val**2 * p2[1]
+                + t_val**3 * p3[1]
+            )
+            points.append((x, y))
+
+        color = get_noise_color()
+        width = random.randint(1, 4)
+        draw.line(points, fill=color, width=width)
+
+    return bg_img
+
+
+def generate_composited_sample(
+    dataset_root: str, text: str, font_path: str, FIXED_WIDTH=320, detector=None
+):
+    # --- 1. DETERMINE MODE (90% Contrast vs 10% Random) ---
+    is_contrast_mode = random.random() < 0.9
 
     if is_contrast_mode:
         want_white_text = random.choice([True, False])
@@ -76,15 +137,15 @@ def generate_composited_sample(
         )
     else:
         roi_background, _ = get_random_non_overlapping_roi(
-            dataset_root, roi_size=(target_roi_w, target_roi_h)
+            dataset_root, roi_size=(target_roi_w, target_roi_h), detector=detector
         )
 
     if roi_background is None:
         return None
 
     # --- 4. CONTRAST CORRECTION ---
+    avg_brightness = get_avg_brightness(roi_background)
     if is_contrast_mode:
-        avg_brightness = get_avg_brightness(roi_background)
         is_bg_light = avg_brightness > 127.5
 
         if (want_white_text and is_bg_light) or (
@@ -108,6 +169,11 @@ def generate_composited_sample(
 
     # --- 5. FINAL COMPOSITE ---
     final_bg = Image.fromarray(roi_background)
+
+    # Add extra random noise to background before pasting text
+    if random.random() < 0.7:  # 70% chance to add noise
+        final_bg = add_random_noise_to_bg(final_bg, is_contrast_mode, avg_brightness)
+
     bg_w, bg_h = final_bg.size
     text_img.thumbnail((bg_w, bg_h), Image.Resampling.LANCZOS)
     curr_tw, curr_th = text_img.size
@@ -137,13 +203,24 @@ def get_random_word_count(mu, sigma):
 
 
 class DatasetGenerator:
-    def __init__(self, dataset_root, font_dir, output_dir):
+    def __init__(
+        self,
+        dataset_root,
+        font_dir,
+        output_dir,
+        ocr_det_model=None,
+    ):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.fake = Faker()
         self.train_fonts, self.test_fonts = initialize_font_samplers(
             font_dir, split_ratio=0.8
         )
+        if ocr_det_model:
+            print("Initializing Background Cleaning Detector (OpenOCR)...")
+            self.detector = OpenOCRDetector(ocr_det_model)
+        else:
+            self.detector = None
 
     def _prepare_dirs(self):
         for split in ["train", "test"]:
@@ -243,9 +320,18 @@ class DatasetGenerator:
                 font_sampler = self.test_fonts
 
             font_path = font_sampler.get_random_font()
-            if not font_path:
-                continue
             text = self.get_sentence()
+
+            # Ensure font supports characters in text
+            retry_count = 0
+            while font_path and not check_font_chars_support(font_path, text) and retry_count < 10:
+                font_path = font_sampler.get_random_font()
+                text = self.get_sentence()
+                retry_count += 1
+
+            if not font_path or not check_font_chars_support(font_path, text):
+                continue
+
             # FIXED_WIDTH here still influences the "origin logic" aspect ratio,
             # but the output is guaranteed 128x128 by the function above.
             result = generate_composited_sample(
@@ -253,6 +339,7 @@ class DatasetGenerator:
                 text=text,
                 font_path=font_path,
                 FIXED_WIDTH=256,
+                detector=self.detector,
             )
 
             if result is None:
@@ -271,9 +358,14 @@ if __name__ == "__main__":
     SOURCE_DATA = "resource/444-2/train"
     FONT_DIR = "resource/fonts"
     EXPORT_DEST = "synthetic_dataset"
-    TOTAL_SAMPLES = 100000
+    TOTAL_SAMPLES = 50000
+
+    DET_MODEL = "checkpoints/openocr_det_model.onnx"
 
     generator = DatasetGenerator(
-        dataset_root=SOURCE_DATA, font_dir=FONT_DIR, output_dir=EXPORT_DEST
+        dataset_root=SOURCE_DATA,
+        font_dir=FONT_DIR,
+        output_dir=EXPORT_DEST,
+        ocr_det_model=DET_MODEL,
     )
     generator.generate(n_samples=TOTAL_SAMPLES)

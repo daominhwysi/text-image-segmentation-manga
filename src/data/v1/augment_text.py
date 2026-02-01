@@ -16,7 +16,7 @@ def augment_text_image(image):
             A.Affine(
                 scale={"x": (0.5, 1.5), "y": (0.5, 1.5)},
                 translate_percent=[-0.05, 0.05],
-                rotate=[-30, 30],
+                rotate=[-10, 10],
                 shear=[-10, 10],
                 interpolation=cv2.INTER_LINEAR,
                 mask_interpolation=cv2.INTER_NEAREST,

@@ -2,8 +2,8 @@ import os
 import cv2
 import numpy as np
 import time
-from src.data.v2.openocr.det_infer import OpenOCRDetector
-from src.data.v2.openocr.rec_infer import StandaloneRecognizer
+from src.data.openocr.det_infer import OpenOCRDetector
+from src.data.openocr.rec_infer import StandaloneRecognizer
 
 def get_rotate_crop_image(img, points):
     """

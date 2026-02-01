@@ -10,6 +10,23 @@ def is_font_file(filename):
     return filename.lower().endswith(tuple(VALID_EXTENSIONS))
 
 
+def check_font_chars_support(font_path, text):
+    """Checks if the font supports all characters in the text."""
+    try:
+        from PIL import ImageFont
+
+        font = ImageFont.truetype(font_path, 24)
+        for char in text:
+            if char.isspace():
+                continue
+            # getmask is a good way to check if glyph exists
+            if font.getmask(char).getbbox() is None:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 class FontHierarchicalSampler:
     def __init__(self, file_paths):
         """

@@ -3,3 +3,7 @@
 __pycache__/
 .agent
 *.onnx
+/visualization
+/representative_sample_folder
+/checkpoints
+
