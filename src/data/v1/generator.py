@@ -97,30 +97,58 @@ def add_random_noise_to_bg(
 def generate_composited_sample(
     dataset_root: str, text: str, font_path: str, FIXED_WIDTH=320, detector=None
 ):
-    # --- 1. DETERMINE MODE (90% Contrast vs 10% Random) ---
     is_contrast_mode = random.random() < 0.9
+    is_roi_bg = random.random() >= 0.25
+
+    # Determine outline usage based on background type
+    if is_roi_bg:
+        use_outline = random.random() < 0.75
+    else:
+        use_outline = random.random() < 0.5
+
+    # Deciding effects early to reuse them in contrast correction if needed
+    use_shadow = random.random() < 0.2
+    use_glow = random.random() < 0.2
+    use_morphology = random.choice([None, "dilation", "erosion"]) if random.random() < 0.3 else None
+    morph_size = random.randint(1, 3)
 
     if is_contrast_mode:
         want_white_text = random.choice([True, False])
         text_color = get_natural_color(is_white=want_white_text)
         stroke_color = get_natural_color(is_white=not want_white_text)
+        shadow_color = get_natural_color(is_white=not want_white_text)[:3] + (128,)
+        glow_color = get_natural_color(is_white=not want_white_text)[:3] + (128,)
     else:
         text_color = get_random_rgb_alpha()
         stroke_color = get_random_rgb_alpha()
+        shadow_color = get_random_rgb_alpha()[:3] + (128,)
+        glow_color = get_random_rgb_alpha()[:3] + (128,)
+
+    def call_render(t, f, tc, sc, shc, gc):
+        return generate_text_image(
+            text=t,
+            font_path=f,
+            font_size=random.randint(35, 60),
+            shape_ratio=random.uniform(0.5, 2.0),
+            outline=use_outline,
+            text_color=tc,
+            stroke_color=sc,
+            stroke_width=random.randint(1, 5),
+            shadow=use_shadow,
+            shadow_color=shc,
+            shadow_offset=(random.randint(1,4), random.randint(1,4)),
+            shadow_blur=random.randint(0, 3),
+            glow=use_glow,
+            glow_color=gc,
+            glow_width=random.randint(1, 6),
+            morphology_step=use_morphology,
+            morphology_size=morph_size,
+            alignment=random.choice(["left", "center", "right"]),
+            line_height_bias=random.uniform(0, 0.5),
+        )
 
     # --- 2. GENERATE INITIAL TEXT IMAGE ---
-    text_img = generate_text_image(
-        text=text,
-        font_path=font_path,
-        font_size=random.randint(35, 60),
-        shape_ratio=random.uniform(0.5, 2.0),
-        outline=random.choice([True, False]),
-        text_color=text_color,
-        stroke_color=stroke_color,
-        stroke_width=random.randint(1, 5),
-        alignment=random.choice(["left", "center", "right"]),
-        line_height_bias=random.uniform(0, 0.5),
-    )
+    text_img = call_render(text, font_path, text_color, stroke_color, shadow_color, glow_color)
 
     tw, th = text_img.size
     text_ratio = tw / th
@@ -128,8 +156,8 @@ def generate_composited_sample(
     target_roi_h = int(FIXED_WIDTH / text_ratio)
     target_roi_h = min(target_roi_h, FIXED_WIDTH * 2)
 
-    # --- 3. BACKGROUND SELECTION (NEW 25% LOGIC) ---
-    if random.random() < 0.25:
+    # --- 3. BACKGROUND SELECTION ---
+    if not is_roi_bg:
         bg_is_white = random.choice([True, False])
         bg_color = get_natural_color(is_white=bg_is_white)
         roi_background = np.full(
@@ -154,24 +182,15 @@ def generate_composited_sample(
             want_white_text = not want_white_text
             text_color = get_natural_color(is_white=want_white_text)
             stroke_color = get_natural_color(is_white=not want_white_text)
+            shadow_color = get_natural_color(is_white=not want_white_text)[:3] + (128,)
+            glow_color = get_natural_color(is_white=not want_white_text)[:3] + (128,)
 
-            text_img = generate_text_image(
-                text=text,
-                font_path=font_path,
-                font_size=random.randint(35, 60),
-                shape_ratio=text_ratio,
-                outline=random.choice([True, False]),
-                text_color=text_color,
-                stroke_color=stroke_color,
-                stroke_width=random.randint(1, 5),
-                alignment=random.choice(["left", "center", "right"]),
-            )
+            text_img = call_render(text, font_path, text_color, stroke_color, shadow_color, glow_color)
 
     # --- 5. FINAL COMPOSITE ---
     final_bg = Image.fromarray(roi_background)
 
-    # Add extra random noise to background before pasting text
-    if random.random() < 0.7:  # 70% chance to add noise
+    if random.random() < 0.7:
         final_bg = add_random_noise_to_bg(final_bg, is_contrast_mode, avg_brightness)
 
     bg_w, bg_h = final_bg.size
@@ -179,20 +198,17 @@ def generate_composited_sample(
     curr_tw, curr_th = text_img.size
     offset = ((bg_w - curr_tw) // 2, (bg_h - curr_th) // 2)
 
+    # SOFT MASK IMPLEMENTATION
     mask = Image.new("L", (bg_w, bg_h), 0)
     text_alpha = text_img.split()[3]
     mask.paste(text_alpha, offset)
-    mask = mask.point(lambda p: 255 if p > 10 else 0)
+    # Removing mask thresholding to keep it soft!
 
     final_bg.paste(text_img, offset, text_img)
 
-    # --- 6. RESIZE TO 128x128 (NEW STEP) ---
-    # We do this at the very end to preserve the original composition logic
     final_bg = final_bg.resize((256, 256), Image.Resampling.LANCZOS)
+    mask = mask.resize((256, 256), Image.Resampling.LANCZOS) # Use Lanczos for soft mask resize
 
-    mask = mask.resize(
-        (256, 256), Image.Resampling.NEAREST
-    )  # Nearest used for mask to keep it binary
     final_bg = augment_output_image(final_bg)
     return final_bg, mask
 
@@ -234,75 +250,19 @@ class DatasetGenerator:
         if not words:
             return ""
 
-        # 1. Randomly wrap words in "Odd" characters (Lower probability)
         for i in range(len(words)):
             prob = random.random()
-            if prob < 0.02:  # 2% chance for "The Odd Ones"
-                pair = random.choice(
-                    [
-                        ("(", ")"),
-                        ("[", "]"),
-                        ("{", "}"),
-                        ("<", ">"),
-                        ('"', '"'),
-                        ("'", "'"),
-                    ]
-                )
+            if prob < 0.02:
+                pair = random.choice([("(", ")"), ("[", "]"), ("{", "}"), ("<", ">"), ('"', '"'), ("'", "'")])
                 words[i] = f"{pair[0]}{words[i]}{pair[1]}"
-            elif prob < 0.04:  # 2% chance for "Prefix/Suffix Noise"
-                char = random.choice(
-                    ["#", "@", "~", "-", "+", "=", "%", "^", "&", "*", "|"]
-                )
-                words[i] = (
-                    f"{char}{words[i]}"
-                    if random.getrandbits(1)
-                    else f"{words[i]}{char}"
-                )
+            elif prob < 0.04:
+                char = random.choice(["#", "@", "~", "-", "+", "=", "%", "^", "&", "*", "|"])
+                words[i] = f"{char}{words[i]}" if random.getrandbits(1) else f"{words[i]}{char}"
 
         text = " ".join(words)
-
-        # 2. Weighted Terminators
-        # We use a list of weights to ensure standard terminators remain dominant
-        # while "Odd" ones show up just enough for the AI to learn them.
-        terminators = [
-            ".",
-            "!",
-            "?",
-            "-",
-            "...",  # Standard (High weight)
-            ":",
-            ";",  # Common (Medium weight)
-            " #",
-            " @",
-            " %",
-            " -",  # Odd (Low weight)
-            " >",
-            " ]",
-            " }",
-            " |",  # Rare (Very low weight)
-        ]
-        weights = [
-            12,
-            12,
-            12,
-            12,
-            12,  # Standard (High)
-            8,
-            8,  # Common (Medium)
-            5,
-            5,
-            5,
-            5,  # Odd (Low)
-            1,
-            1,
-            1,
-            1,  # Rare (Very low)
-        ]
-        # Total Sum: 100
-
+        terminators = [".", "!", "?", "-", "...", ":", ";", " #", " @", " %", " -", " >", " ]", " }", " |"]
+        weights = [12, 12, 12, 12, 12, 8, 8, 5, 5, 5, 5, 1, 1, 1, 1]
         chosen_terminator = random.choices(terminators, weights=weights)[0]
-
-        # Capitalize for a standard starting look, then add the tail
         return text.capitalize() + chosen_terminator
 
     def generate(self, n_samples=100, train_ratio=0.8):
@@ -322,7 +282,6 @@ class DatasetGenerator:
             font_path = font_sampler.get_random_font()
             text = self.get_sentence()
 
-            # Ensure font supports characters in text
             retry_count = 0
             while font_path and not check_font_chars_support(font_path, text) and retry_count < 10:
                 font_path = font_sampler.get_random_font()
@@ -332,8 +291,6 @@ class DatasetGenerator:
             if not font_path or not check_font_chars_support(font_path, text):
                 continue
 
-            # FIXED_WIDTH here still influences the "origin logic" aspect ratio,
-            # but the output is guaranteed 128x128 by the function above.
             result = generate_composited_sample(
                 dataset_root=self.dataset_root,
                 text=text,
@@ -347,10 +304,7 @@ class DatasetGenerator:
 
             img, mask = result
             file_id = f"sample_{i:06d}"
-            img.save(
-                os.path.join(self.output_dir, split, "images", f"{file_id}.jpg"),
-                quality=95,
-            )
+            img.save(os.path.join(self.output_dir, split, "images", f"{file_id}.jpg"), quality=95)
             mask.save(os.path.join(self.output_dir, split, "masks", f"{file_id}.png"))
 
 
@@ -359,7 +313,6 @@ if __name__ == "__main__":
     FONT_DIR = "resource/fonts"
     EXPORT_DEST = "synthetic_dataset"
     TOTAL_SAMPLES = 50000
-
     DET_MODEL = "checkpoints/openocr_det_model.onnx"
 
     generator = DatasetGenerator(
