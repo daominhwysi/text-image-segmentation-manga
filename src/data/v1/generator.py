@@ -117,7 +117,7 @@ def generate_composited_sample(
         outline=random.choice([True, False]),
         text_color=text_color,
         stroke_color=stroke_color,
-        stroke_width=random.randint(1, 2),
+        stroke_width=random.randint(1, 5),
         alignment=random.choice(["left", "center", "right"]),
         line_height_bias=random.uniform(0, 0.5),
     )
@@ -163,7 +163,7 @@ def generate_composited_sample(
                 outline=random.choice([True, False]),
                 text_color=text_color,
                 stroke_color=stroke_color,
-                stroke_width=random.randint(1, 2),
+                stroke_width=random.randint(1, 5),
                 alignment=random.choice(["left", "center", "right"]),
             )
 
