@@ -15,7 +15,7 @@ from torch.amp import GradScaler, autocast
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import timm
-from torchmetrics.classification import MulticlassJaccardIndex
+from torchmetrics.classification import BinaryJaccardIndex
 from src.segment.models import Unet_EfficientViT_B2, Unet_MobileNetV4, Unet_YOLO, Unet_YOLO_Medium
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -91,7 +91,7 @@ class TextSegmentationDataset(Dataset):
 
         mask_path = os.path.join(self.mask_dir, os.path.splitext(self.image_names[idx])[0] + ".png")
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        mask = (mask > 127).astype(np.int64)
+        mask = mask.astype(np.float32) / 255.0
 
         if self.transform:
             augmented = self.transform(image=image, mask=mask)
@@ -99,9 +99,12 @@ class TextSegmentationDataset(Dataset):
             mask = augmented['mask']
 
         if not isinstance(mask, torch.Tensor):
-            mask = torch.from_numpy(mask).long()
+            mask = torch.from_numpy(mask).float()
         else:
-            mask = mask.long()
+            mask = mask.float()
+
+        # Add channel dimension
+        mask = mask.unsqueeze(0)
 
         return image, mask
 
@@ -109,34 +112,36 @@ class TextSegmentationDataset(Dataset):
 # ==========================================
 # 3. LOSS & TRAINING
 # ==========================================
-class DiceCELoss(nn.Module):
-    def __init__(self, num_classes=2, dice_weight=1.0, ce_weight=1.0):
-        super(DiceCELoss, self).__init__()
-        self.num_classes = num_classes
+class SoftDiceBCELoss(nn.Module):
+    def __init__(self, dice_weight=1.0, bce_weight=1.0):
+        super(SoftDiceBCELoss, self).__init__()
         self.dice_weight = dice_weight
-        self.ce_weight = ce_weight
-        self.ce = nn.CrossEntropyLoss()
+        self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss()
 
-    def dice_loss(self, logits, targets):
+    def soft_dice_loss(self, logits, targets):
         smooth = 1e-6
-        probs = F.softmax(logits, dim=1)
-        targets_one_hot = F.one_hot(targets, num_classes=self.num_classes).permute(0, 3, 1, 2).float()
-        dims = (0, 2, 3)
-        intersection = torch.sum(probs * targets_one_hot, dims)
-        cardinality = torch.sum(probs + targets_one_hot, dims)
+        probs = torch.sigmoid(logits)
+
+        # Flatten tensors
+        probs = probs.view(-1)
+        targets = targets.view(-1)
+
+        intersection = torch.sum(probs * targets)
+        cardinality = torch.sum(probs + targets)
         dice_score = (2. * intersection + smooth) / (cardinality + smooth)
-        return 1 - dice_score.mean()
+        return 1 - dice_score
 
     def forward(self, logits, targets):
-        ce_loss = self.ce(logits, targets)
-        dice_loss = self.dice_loss(logits, targets)
-        return (self.ce_weight * ce_loss) + (self.dice_weight * dice_loss)
+        bce_loss = self.bce(logits, targets)
+        dice_loss = self.soft_dice_loss(logits, targets)
+        return (self.bce_weight * bce_loss) + (self.dice_weight * dice_loss)
 
 class CombinedDSLoss(nn.Module):
-    def __init__(self, num_classes=2):
+    def __init__(self):
         super().__init__()
-        self.main_loss = DiceCELoss(num_classes=num_classes)
-        self.ds_loss = DiceCELoss(num_classes=num_classes)
+        self.main_loss = SoftDiceBCELoss()
+        self.ds_loss = SoftDiceBCELoss()
 
     def forward(self, outputs, targets):
         if isinstance(outputs, (list, tuple)):
@@ -157,15 +162,15 @@ def train_model():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
     # 2. Initialize Model (Starts Frozen)
-    model = Unet_MobileNetV4(num_classes=2).to(DEVICE)
+    model = Unet_MobileNetV4(num_classes=1).to(DEVICE)
     model.freeze_backbone()
 
     # 3. Optimizer & Loss
     # Only optimize parameters that require_grad
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR_HEAD)
-    criterion = CombinedDSLoss(num_classes=2)
+    criterion = CombinedDSLoss()
     scaler = GradScaler("cuda")
-    metric = MulticlassJaccardIndex(num_classes=2).to(DEVICE)
+    metric = BinaryJaccardIndex().to(DEVICE)
 
     best_miou = 0.0
 
@@ -203,7 +208,8 @@ def train_model():
                 imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
                 # model.eval() returns ONLY the main output, not a tuple
                 val_output = model(imgs)
-                preds = torch.argmax(val_output, dim=1)
+                # For binary segmentation, we use threshold 0.5 on sigmoid (or 0 on logits)
+                preds = (val_output > 0).float()
                 metric.update(preds, masks)
 
         miou = metric.compute().item()

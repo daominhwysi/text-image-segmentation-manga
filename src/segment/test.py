@@ -14,7 +14,7 @@ CHECKPOINT_PATH = "best_manga_unet.pth"
 INPUT_FOLDER = "representative_sample_folder"       # Folder containing your raw images
 OUTPUT_FOLDER = "inference_output" # Where results will be saved
 IMG_SIZE = 256
-NUM_CLASSES = 2
+NUM_CLASSES = 1
 
 # Define colors for visualization (BGR format for OpenCV)
 # Class 0 (Background): Black
@@ -36,9 +36,13 @@ def get_inference_transforms():
         ToTensorV2()
     ])
 
-def decode_mask(mask_index):
-    """Converts class indices to an RGB color mask."""
-    return COLORS[mask_index]
+def decode_mask(mask_prob):
+    """Converts probability map to an RGB color mask."""
+    # mask_prob is expected to be [0, 1]
+    mask_vis = np.zeros((mask_prob.shape[0], mask_prob.shape[1], 3), dtype=np.uint8)
+    # Highlight text in green based on probability
+    mask_vis[:, :, 1] = (mask_prob * 255).astype(np.uint8)
+    return mask_vis
 
 # ==========================================
 # 3. INFERENCE FUNCTION
@@ -77,12 +81,13 @@ def run_inference():
 
             # Predict
             logits = model(input_tensor)
-            preds = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy() # [H, W]
+            probs = torch.sigmoid(logits).squeeze(0).squeeze(0).cpu().numpy() # [H, W]
+            preds = (probs > 0.5).astype(np.uint8)
 
             # Post-process mask
             # Resize mask back to original image size for better visualization
-            mask_vis = decode_mask(preds)
-            mask_vis_resized = cv2.resize(mask_vis, (w_orig, h_orig), interpolation=cv2.INTER_NEAREST)
+            mask_vis = decode_mask(probs)
+            mask_vis_resized = cv2.resize(mask_vis, (w_orig, h_orig), interpolation=cv2.INTER_LINEAR)
 
             # Create an overlay (optional)
             # Mix 70% original image and 30% mask for areas where text is detected
