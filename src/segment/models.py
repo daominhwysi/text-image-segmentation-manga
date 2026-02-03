@@ -27,7 +27,7 @@ class SCSEModule(nn.Module):
         return x * self.cSE(x) + x * self.sSE(x)
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, up=True) -> None:
+    def __init__(self, in_channels, skip_channels, out_channels, up=True,dropout_prob=0.1 ) -> None:
         super().__init__()
         if up:
             self.upsample = nn.Sequential(
@@ -41,6 +41,7 @@ class DecoderBlock(nn.Module):
             nn.Conv2d(in_channels=out_channels + skip_channels, out_channels=out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(num_features=out_channels),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout_prob),
             nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(num_features=out_channels),
             nn.ReLU(inplace=True),
@@ -137,7 +138,7 @@ class Unet_EfficientViT_B2(nn.Module):
 class Unet_MobileNetV4(nn.Module):
     def __init__(self, num_classes=2, pretrained=True):
         super(Unet_MobileNetV4, self).__init__()
-        backbone = timm.create_model('mobilenetv4_hybrid_medium.e200_r256_in12k_ft_in1k', pretrained=pretrained, features_only=False)
+        backbone = timm.create_model('mobilenetv4_hybrid_medium.e200_r256_in12k_ft_in1k', pretrained=pretrained, features_only=False, drop_path_rate=0.2)
 
         self.stem = nn.Sequential(backbone.conv_stem, backbone.bn1) # 1/2
         self.stage0 = backbone.blocks[0] # 1/4

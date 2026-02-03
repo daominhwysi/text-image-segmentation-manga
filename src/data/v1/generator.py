@@ -198,16 +198,17 @@ def generate_composited_sample(
     curr_tw, curr_th = text_img.size
     offset = ((bg_w - curr_tw) // 2, (bg_h - curr_th) // 2)
 
-    # SOFT MASK IMPLEMENTATION
+    # HARD MASK IMPLEMENTATION
     mask = Image.new("L", (bg_w, bg_h), 0)
     text_alpha = text_img.split()[3]
     mask.paste(text_alpha, offset)
-    # Removing mask thresholding to keep it soft!
 
     final_bg.paste(text_img, offset, text_img)
 
     final_bg = final_bg.resize((256, 256), Image.Resampling.LANCZOS)
-    mask = mask.resize((256, 256), Image.Resampling.LANCZOS) # Use Lanczos for soft mask resize
+    mask = mask.resize((256, 256), Image.Resampling.NEAREST)
+    # Ensure binary mask (0 or 255)
+    mask = mask.point(lambda p: 255 if p > 127 else 0)
 
     final_bg = augment_output_image(final_bg)
     return final_bg, mask

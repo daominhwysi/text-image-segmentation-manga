@@ -10,19 +10,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 # UPDATE: New AMP API
-from torch.amp import GradScaler, autocast
+from torch.amp.grad_scaler import GradScaler
+from torch.amp.autocast_mode import autocast
 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import timm
 from torchmetrics.classification import BinaryJaccardIndex
-from src.segment.models import Unet_EfficientViT_B2, Unet_MobileNetV4, Unet_YOLO, Unet_YOLO_Medium
+from src.models import Unet_EfficientViT_B2, Unet_MobileNetV4, Unet_YOLO, Unet_YOLO_Medium
+from timm.utils.model_ema import ModelEmaV2  # Standard EMA implementation
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+
+EMA_DECAY = 0.99
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMG_SIZE = 256
-BATCH_SIZE = 32
-NUM_EPOCHS_FREEZED = 5  # Warm-up phase
-NUM_EPOCHS_TOTAL = 30
+BATCH_SIZE = 64
+NUM_EPOCHS_FREEZED = 5
+NUM_EPOCHS_TOTAL = 70
 LR_HEAD = 1e-3         # Faster LR for new decoder
 LR_FINETUNE = 1e-5     # Slow LR for backbone
 
@@ -70,10 +75,6 @@ def get_transforms(split="train"):
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ToTensorV2()
         ])
-
-# ==========================================
-# 1. DATASET
-# ==========================================
 class TextSegmentationDataset(Dataset):
     def __init__(self, root_dir, split='train', transform=None):
         self.img_dir = os.path.join(root_dir, split, 'images')
@@ -161,26 +162,40 @@ def train_model():
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
-    # 2. Initialize Model (Starts Frozen)
+    # 2. Initialize Model & EMA
     model = Unet_MobileNetV4(num_classes=1).to(DEVICE)
     model.freeze_backbone()
 
-    # 3. Optimizer & Loss
-    # Only optimize parameters that require_grad
-    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR_HEAD)
+    # Initialize EMA object
+    ema = ModelEmaV2(model, decay=EMA_DECAY)
+
+    # 3. Setup Optimizer & Loss
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR_HEAD, weight_decay=0.05)
+
+    iters_per_epoch = len(train_loader)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS_FREEZED * iters_per_epoch)
+
     criterion = CombinedDSLoss()
     scaler = GradScaler("cuda")
-    metric = BinaryJaccardIndex().to(DEVICE)
 
-    best_miou = 0.0
+    # Dual Metrics for Comparison
+    metric_reg = BinaryJaccardIndex().to(DEVICE)
+    metric_ema = BinaryJaccardIndex().to(DEVICE)
+
+    best_miou_ema = 0.0
 
     for epoch in range(NUM_EPOCHS_TOTAL):
-        # --- Phase Switching Logic ---
+        # --- PHASE 2 TRANSITION ---
         if epoch == NUM_EPOCHS_FREEZED:
-            print("\n🔥 Unfreezing Backbone for Fine-tuning...")
+            print(f"\n🔥 Phase 2: Unfreezing Backbone...")
             model.unfreeze_backbone()
-            # Re-initialize optimizer with lower LR for the whole network
-            optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINETUNE)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINETUNE, weight_decay=0.05)
+
+            warmup_iters = iters_per_epoch * 2
+            total_iters_phase2 = (NUM_EPOCHS_TOTAL - NUM_EPOCHS_FREEZED) * iters_per_epoch
+            warmup_sched = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_iters)
+            cosine_sched = CosineAnnealingLR(optimizer, T_max=total_iters_phase2 - warmup_iters)
+            scheduler = SequentialLR(optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_iters])
 
         model.train()
         epoch_loss = 0
@@ -190,35 +205,62 @@ def train_model():
             imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
 
             optimizer.zero_grad()
-            outputs = model(imgs)
+            with autocast(device_type="cuda"):
+                outputs = model(imgs)
             loss = criterion(outputs, masks)
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
+            # --- CRITICAL: Update EMA weights after optimizer step ---
+            ema.update(model)
+
+            scheduler.step()
             epoch_loss += loss.item()
             loop.set_postfix(loss=f"{loss.item():.4f}")
 
-        # --- Validation ---
+        # --- DUAL VALIDATION (Regular vs EMA) ---
+        metric_reg.reset()
+        metric_ema.reset()
         model.eval()
-        metric.reset()
+        ema.module.eval() # Ensure EMA is in eval mode (BN/Dropout)
+
         with torch.no_grad():
             for imgs, masks in val_loader:
                 imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
-                # model.eval() returns ONLY the main output, not a tuple
-                val_output = model(imgs)
-                # For binary segmentation, we use threshold 0.5 on sigmoid (or 0 on logits)
-                preds = (val_output > 0).float()
-                metric.update(preds, masks)
+                masks_long = (masks > 0.5).long()
 
-        miou = metric.compute().item()
-        print(f"📊 Epoch {epoch+1} | Avg Loss: {epoch_loss/len(train_loader):.4f} | Val mIoU: {miou:.4f}")
+                with autocast(device_type="cuda"):
+                    # 1. Test Regular Model
+                    out_reg = model(imgs)
+                    if isinstance(out_reg, (list, tuple)): out_reg = out_reg[0]
+                    preds_reg = (out_reg > 0).float()
+                    metric_reg.update(preds_reg, masks_long)
 
-        if miou > best_miou:
-            best_miou = miou
-            torch.save(model.state_dict(), "best_manga_unet.pth")
-            print("💾 Model Saved!")
+                    # 2. Test EMA Model
+                    out_ema = ema.module(imgs)
+                    if isinstance(out_ema, (list, tuple)): out_ema = out_ema[0]
+                    preds_ema = (out_ema > 0).float()
+                    metric_ema.update(preds_ema, masks_long)
+
+        miou_reg = metric_reg.compute().item()
+        miou_ema = metric_ema.compute().item()
+
+        print(f"📊 Epoch {epoch+1} | Loss: {epoch_loss/len(train_loader):.4f}")
+        print(f"   > Regular mIoU: {miou_reg:.4f}")
+        print(f"   > EMA mIoU:     {miou_ema:.4f}")
+
+        # Save based on EMA performance (usually superior)
+        if miou_ema > best_miou_ema:
+            best_miou_ema = miou_ema
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'ema_state_dict': ema.module.state_dict(),
+            }, "best_manga_model_combined.pth")
+            print(f"💾 Saved Best EMA Model (mIoU: {miou_ema:.4f})")
 
 if __name__ == "__main__":
     train_model()

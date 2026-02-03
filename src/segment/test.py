@@ -4,13 +4,13 @@ import numpy as np
 import torch
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from src.segment.models import Unet_MobileNetV4 # Ensure this matches your file structure
+from src.models import Unet_MobileNetV4 # Ensure this matches your file structure
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT_PATH = "best_manga_unet.pth"
+CHECKPOINT_PATH = "best_manga_model_combined.pth"
 INPUT_FOLDER = "representative_sample_folder"       # Folder containing your raw images
 OUTPUT_FOLDER = "inference_output" # Where results will be saved
 IMG_SIZE = 256
@@ -54,7 +54,7 @@ def run_inference():
     model = Unet_MobileNetV4(num_classes=NUM_CLASSES).to(DEVICE)
 
     state_dict = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict['ema_state_dict'])
     model.eval()
 
     transforms = get_inference_transforms()
