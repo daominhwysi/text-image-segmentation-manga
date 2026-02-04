@@ -1,9 +1,5 @@
 /resource
-/synthetic_dataset
 __pycache__/
-.agent
 *.onnx
-/visualization
-/representative_sample_folder
 /checkpoints
-
+/output

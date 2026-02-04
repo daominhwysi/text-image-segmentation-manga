@@ -129,7 +129,7 @@ def generate_composited_sample(
             text=t,
             font_path=f,
             font_size=random.randint(35, 60),
-            shape_ratio=random.uniform(0.5, 2.0),
+            shape_ratio=random.uniform(0.25, 4.0),
             outline=use_outline,
             text_color=tc,
             stroke_color=sc,
@@ -312,7 +312,7 @@ class DatasetGenerator:
 if __name__ == "__main__":
     SOURCE_DATA = "resource/444-2/train"
     FONT_DIR = "resource/fonts"
-    EXPORT_DEST = "synthetic_dataset"
+    EXPORT_DEST = "output/synthetic_dataset"
     TOTAL_SAMPLES = 50000
     DET_MODEL = "checkpoints/openocr_det_model.onnx"
 

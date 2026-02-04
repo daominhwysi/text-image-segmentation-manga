@@ -11,8 +11,8 @@ from src.models import Unet_MobileNetV4 # Ensure this matches your file structur
 # ==========================================
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT_PATH = "best_manga_model_combined.pth"
-INPUT_FOLDER = "representative_sample_folder"       # Folder containing your raw images
-OUTPUT_FOLDER = "inference_output" # Where results will be saved
+INPUT_FOLDER = "resource/representative_sample_folder"       # Folder containing your raw images
+OUTPUT_FOLDER = "output/inference_output" # Where results will be saved
 IMG_SIZE = 256
 NUM_CLASSES = 1
 
