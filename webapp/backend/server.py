@@ -20,30 +20,35 @@ app.add_middleware(
 DATASET_ROOT = "/srv/shared/text-image-segmentation/output/synthetic_dataset"
 STATUS_FILE = os.path.join(DATASET_ROOT, "review_status.json")
 
-def load_status():
-    if os.path.exists(STATUS_FILE):
-        with open(STATUS_FILE, "r") as f:
+def load_status(split: str):
+    status_file = os.path.join(DATASET_ROOT, f"review_status_{split}.json")
+    if os.path.exists(status_file):
+        with open(status_file, "r") as f:
             return json.load(f)
     return {}
 
-def save_status(status):
-    with open(STATUS_FILE, "w") as f:
+def save_status(status, split: str):
+    status_file = os.path.join(DATASET_ROOT, f"review_status_{split}.json")
+    with open(status_file, "w") as f:
         json.dump(status, f, indent=4)
 
 class ReviewUpdate(BaseModel):
     sample_name: str
     status: str  # "approved", "rejected", "pending"
+    split: str
 
 @app.get("/samples")
-def get_samples():
-    train_images = os.path.join(DATASET_ROOT, "train", "images")
-    if not os.path.exists(train_images):
+def get_samples(split: str = "train"):
+    # Map 'valid' to 'test' folder if needed
+    folder = "test" if split == "valid" else split
+    images_dir = os.path.join(DATASET_ROOT, folder, "images")
+    if not os.path.exists(images_dir):
         return []
 
-    images = [f for f in os.listdir(train_images) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    images = [f for f in os.listdir(images_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     images.sort()
 
-    statuses = load_status()
+    statuses = load_status(split)
 
     samples = []
     for img in images:
@@ -55,21 +60,23 @@ def get_samples():
     return samples
 
 @app.get("/image/{sample_name}")
-def get_image(sample_name: str):
-    path = os.path.join(DATASET_ROOT, "train", "images", sample_name)
+def get_image(sample_name: str, split: str = "train"):
+    folder = "test" if split == "valid" else split
+    path = os.path.join(DATASET_ROOT, folder, "images", sample_name)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(path)
 
 @app.get("/mask/{sample_name}")
-def get_mask(sample_name: str):
+def get_mask(sample_name: str, split: str = "train"):
     # Try common mask extensions if the image extension doesn't match
+    folder = "test" if split == "valid" else split
     base_name = os.path.splitext(sample_name)[0]
-    mask_path = os.path.join(DATASET_ROOT, "train", "masks", base_name + ".png")
+    mask_path = os.path.join(DATASET_ROOT, folder, "masks", base_name + ".png")
 
     if not os.path.exists(mask_path):
         # Retry with original extension if needed
-        mask_path = os.path.join(DATASET_ROOT, "train", "masks", sample_name)
+        mask_path = os.path.join(DATASET_ROOT, folder, "masks", sample_name)
 
     if not os.path.exists(mask_path):
         raise HTTPException(status_code=404, detail="Mask not found")
@@ -77,9 +84,9 @@ def get_mask(sample_name: str):
 
 @app.post("/review")
 def update_review(update: ReviewUpdate):
-    statuses = load_status()
+    statuses = load_status(update.split)
     statuses[update.sample_name] = update.status
-    save_status(statuses)
+    save_status(statuses, update.split)
     return {"message": "Status updated"}
 
 if __name__ == "__main__":

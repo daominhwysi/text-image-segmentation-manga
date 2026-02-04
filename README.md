@@ -65,6 +65,14 @@ conda activate text-image-seg
 ---
 
 ## 📖 Usage
+### 0. Run the webapp to review the samples
+```bash
+# Backend
+uvicorn webapp.backend.server:app --reload
+
+# Frontend
+cd webapp/frontend && npm run dev
+```
 
 ### 1. Generate Synthetic Dataset
 Before training, generate a synthetic dataset using background images and fonts.

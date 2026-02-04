@@ -314,6 +314,9 @@ if __name__ == "__main__":
     FONT_DIR = "resource/fonts"
     EXPORT_DEST = "output/synthetic_dataset"
     TOTAL_SAMPLES = 50000
+    # Take args as number of sample
+    TOTAL_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 else TOTAL_SAMPLES
+
     DET_MODEL = "checkpoints/openocr_det_model.onnx"
 
     generator = DatasetGenerator(
