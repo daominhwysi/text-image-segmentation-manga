@@ -17,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATASET_ROOT = "/srv/shared/text-image-segmentation/synthetic_dataset"
+DATASET_ROOT = "/srv/shared/text-image-segmentation/output/synthetic_dataset"
 STATUS_FILE = os.path.join(DATASET_ROOT, "review_status.json")
 
 def load_status():
