@@ -5,13 +5,23 @@ import random
 import cv2
 
 
+_img_paths_cache = {}
+
 def get_random_non_overlapping_roi(
     dataset_path, roi_size=(200, 200), max_attempts=100, detector=None
 ):
+    global _img_paths_cache
+
     img_dir = os.path.join(dataset_path, "images")
     lbl_dir = os.path.join(dataset_path, "labels")
 
-    img_paths = glob.glob(os.path.join(img_dir, "*"))
+    if img_dir not in _img_paths_cache:
+        print(f"Scanning background images in {img_dir}...")
+        img_paths = glob.glob(os.path.join(img_dir, "*"))
+        _img_paths_cache[img_dir] = img_paths
+    else:
+        img_paths = _img_paths_cache[img_dir]
+
     if not img_paths:
         return None, None
 

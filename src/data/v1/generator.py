@@ -1,5 +1,6 @@
 import os
 import random
+import sys
 from tqdm import tqdm
 from faker import Faker
 from src.data.v1.utils import initialize_font_samplers, check_font_chars_support
@@ -9,6 +10,8 @@ from PIL import Image, ImageDraw
 from src.data.v1.text_render import generate_text_image
 from src.data.v1.augment_text import augment_output_image
 from src.data.openocr.det_infer import OpenOCRDetector
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import functools
 
 
 def get_random_rgb_alpha():
@@ -214,6 +217,49 @@ def generate_composited_sample(
     return final_bg, mask
 
 
+_worker_detector = None
+
+
+def get_detector(model_path):
+    global _worker_detector
+    if _worker_detector is None and model_path:
+        _worker_detector = OpenOCRDetector(model_path)
+    return _worker_detector
+
+
+def generate_single_task(task_info):
+    (
+        dataset_root,
+        text,
+        font_path,
+        output_dir,
+        split,
+        i,
+        detector_model_path,
+    ) = task_info
+
+    detector = get_detector(detector_model_path)
+
+    result = generate_composited_sample(
+        dataset_root=dataset_root,
+        text=text,
+        font_path=font_path,
+        FIXED_WIDTH=256,
+        detector=detector,
+    )
+
+    if result is None:
+        return False
+
+    img, mask = result
+    file_id = f"sample_{i:06d}"
+    img.save(
+        os.path.join(output_dir, split, "images", f"{file_id}.jpg"), quality=95
+    )
+    mask.save(os.path.join(output_dir, split, "masks", f"{file_id}.png"))
+    return True
+
+
 def get_random_word_count(mu, sigma):
     count = np.random.normal(mu, sigma)
     return max(1, int(round(count)))
@@ -266,13 +312,14 @@ class DatasetGenerator:
         chosen_terminator = random.choices(terminators, weights=weights)[0]
         return text.capitalize() + chosen_terminator
 
-    def generate(self, n_samples=100, train_ratio=0.8):
+    def generate(self, n_samples=100, train_ratio=0.8, num_workers=4):
         self._prepare_dirs()
         n_train = int(n_samples * train_ratio)
 
-        print(f"Generating {n_samples} samples...")
+        print(f"Generating {n_samples} samples with {num_workers} workers...")
 
-        for i in tqdm(range(n_samples)):
+        tasks = []
+        for i in range(n_samples):
             if i < n_train:
                 split = "train"
                 font_sampler = self.train_fonts
@@ -284,7 +331,11 @@ class DatasetGenerator:
             text = self.get_sentence()
 
             retry_count = 0
-            while font_path and not check_font_chars_support(font_path, text) and retry_count < 10:
+            while (
+                font_path
+                and not check_font_chars_support(font_path, text)
+                and retry_count < 10
+            ):
                 font_path = font_sampler.get_random_font()
                 text = self.get_sentence()
                 retry_count += 1
@@ -292,21 +343,32 @@ class DatasetGenerator:
             if not font_path or not check_font_chars_support(font_path, text):
                 continue
 
-            result = generate_composited_sample(
-                dataset_root=self.dataset_root,
-                text=text,
-                font_path=font_path,
-                FIXED_WIDTH=256,
-                detector=self.detector,
+            # We pass the path to the detector model instead of the detector instance itself
+            # because the ONNX session is not pickleable.
+            detector_path = (
+                self.detector.model_path if self.detector else None
             )
 
-            if result is None:
-                continue
+            tasks.append(
+                (
+                    self.dataset_root,
+                    text,
+                    font_path,
+                    self.output_dir,
+                    split,
+                    i,
+                    detector_path,
+                )
+            )
 
-            img, mask = result
-            file_id = f"sample_{i:06d}"
-            img.save(os.path.join(self.output_dir, split, "images", f"{file_id}.jpg"), quality=95)
-            mask.save(os.path.join(self.output_dir, split, "masks", f"{file_id}.png"))
+        results_count = 0
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(generate_single_task, task) for task in tasks]
+            for _ in tqdm(as_completed(futures), total=len(tasks)):
+                if _.result():
+                    results_count += 1
+
+        print(f"Finished. Generated {results_count} samples.")
 
 
 if __name__ == "__main__":
