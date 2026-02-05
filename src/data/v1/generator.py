@@ -378,9 +378,7 @@ if __name__ == "__main__":
     TOTAL_SAMPLES = 50000
     # Take args as number of sample
     TOTAL_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 else TOTAL_SAMPLES
-
     DET_MODEL = "checkpoints/openocr_det_model.onnx"
-
     generator = DatasetGenerator(
         dataset_root=SOURCE_DATA,
         font_dir=FONT_DIR,

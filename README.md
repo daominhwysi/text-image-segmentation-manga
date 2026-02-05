@@ -8,7 +8,6 @@ This project provides a robust pipeline for **text segmentation** and **OCR** in
 *   **Modern Segmentation Architectures**: Support for high-performance U-Net backbones:
     *   **EfficientViT-B2** for state-of-the-art accuracy.
     *   **MobileNetV4** for a balance of speed and performance.
-    *   **YOLO-based** (Small & Medium) for extremely fast inference.
 *   **OpenOCR Integration**: Standalone inference scripts for text detection and recognition using OpenOCR ONNX models.
 *   **Advanced Training Techniques**:
     *   **Deep Supervision**: Multi-scale loss integration for stable convergence.
@@ -81,7 +80,7 @@ Before training, generate a synthetic dataset using background images and fonts.
 2.  Place fonts in `resource/fonts/`
 3.  Run the generator:
     ```bash
-    python -m src.data.v1.generator
+    python -m src.data.v1.generator --total-samples 50000
     ```
 
 ### 2. Training the Model
@@ -124,8 +123,6 @@ Available models in `src.segment.models`:
 | :--- | :--- | :--- |
 | `Unet_EfficientViT_B2` | EfficientViT-B2 | Maximum Accuracy |
 | `Unet_MobileNetV4` | MobileNetV4 | Balanced Speed/Accuracy |
-| `Unet_YOLO` | YOLO-26n | Fast Inference |
-| `Unet_YOLO_Medium` | YOLO-26m | High-Speed Performance |
 
 ---
 

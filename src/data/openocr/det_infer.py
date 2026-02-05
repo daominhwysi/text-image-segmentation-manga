@@ -102,6 +102,7 @@ class OpenOCRDetector:
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if \
                     'CUDAExecutionProvider' in ort.get_available_providers() else ['CPUExecutionProvider']
 
+        self.model_path = model_path
         self.session = ort.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
 
