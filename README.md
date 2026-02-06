@@ -67,8 +67,7 @@ conda activate text-image-seg
 ### 0. Run the webapp to review the samples
 ```bash
 # Backend
-uvicorn webapp.backend.server:app --reload
-
+uvicorn webapp.backend.server:app --host 0.0.0.0 --port 8000 --reload
 # Frontend
 cd webapp/frontend && npm run dev
 ```

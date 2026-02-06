@@ -43,16 +43,15 @@ def get_transforms(split="train"):
                 scale=(0.8, 1.2),           # Replaces scale_limit=0.2
                 rotate=(-15, 15),           # Replaces rotate_limit=15
                 translate_percent=(-0.1, 0.1), # Replaces shift_limit=0.1
+                mask_interpolation=cv2.INTER_LINEAR,
                 p=0.7
             ),
 
             # 2. Distortion (Parameters updated for newer Albumentations)
             A.OneOf([
-                A.GridDistortion(num_steps=5, distort_limit=0.3, p=1.0),
-                # Removed 'alpha_affine', strictly using elastic params
-                A.ElasticTransform(alpha=1, sigma=50, p=1.0),
-                # Removed 'shift_limit', only distort_limit is needed
-                A.OpticalDistortion(distort_limit=0.2, p=1.0),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
+                A.ElasticTransform(alpha=1, sigma=50, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
+                A.OpticalDistortion(distort_limit=0.2, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
             ], p=0.3),
 
             # 3. Pixel-level Augmentations

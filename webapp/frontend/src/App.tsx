@@ -7,7 +7,7 @@ interface Sample {
   status: 'approved' | 'rejected' | 'pending';
 }
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = 'http://100.119.217.51:8000';
 const ITEM_HEIGHT = 44; // Slightly taller for better touch/click targets
 const VISIBLE_HEIGHT = window.innerHeight - 300; // Dynamic-ish
 const OVERSCAN = 20;
@@ -133,31 +133,34 @@ export default function App() {
     setCurrentIndex(filteredIndices[nextVisualIndex]);
   }, [currentIndex, filteredIndices]);
 
-  const updateStatus = useCallback(async (status: 'approved' | 'rejected' | 'pending') => {
+  const updateStatus = useCallback((status: 'approved' | 'rejected' | 'pending') => {
     const name = allNames[currentIndex];
     if (!name) return;
 
+    // Optimistically update the status in the sidebar/UI
     setSampleMap(prev => ({
       ...prev,
       [name]: { ...prev[name], status }
     }));
 
-    try {
-      await fetch(`${API_BASE}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sample_name: name, status, split }),
-      });
-      navigate(1);
-    } catch (e) {
-      console.error(e);
-    }
+    // Immediately navigate to the next sample to eliminate "dead time"
+    navigate(1);
+
+    // Send the review to the backend in the background
+    fetch(`${API_BASE}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sample_name: name, status, split }),
+    }).catch(err => {
+      console.error('Failed to update status on server:', err);
+      // Optional: Add a toast notification or revert local state on failure
+    });
   }, [currentIndex, allNames, navigate, split]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'a') updateStatus('approved');
-      if (e.key === 'r') updateStatus('rejected');
+      if (e.key === 'd') updateStatus('rejected');
       if (e.key === 's' || e.key === 'ArrowRight') navigate(1);
       if (e.key === 'ArrowLeft') navigate(-1);
     };
@@ -202,7 +205,7 @@ export default function App() {
         <div className="p-6 border-b border-slate-800/60">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent">
-              MangaSeg
+              Vlx²
             </h2>
             <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
               v1.0
@@ -228,8 +231,8 @@ export default function App() {
                 key={f}
                 onClick={() => setStatusFilter(f)}
                 className={`whitespace-nowrap px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${statusFilter === f
-                    ? 'bg-slate-50 border-white text-slate-950'
-                    : 'bg-transparent border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'
+                  ? 'bg-slate-50 border-white text-slate-950'
+                  : 'bg-transparent border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'
                   }`}
               >
                 {f.toUpperCase()}
@@ -280,10 +283,10 @@ export default function App() {
                 </div>
               </div>
               <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-lg ${{
-                  approved: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
-                  rejected: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
-                  pending: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
-                }[currentSample.status]
+                approved: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
+                rejected: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
+                pending: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
+              }[currentSample.status]
                 }`}>
                 {currentSample.status.toUpperCase()}
               </div>
@@ -332,7 +335,7 @@ export default function App() {
                 onClick={() => updateStatus('rejected')}
                 className="px-6 py-2.5 bg-rose-500 hover:bg-rose-400 text-white font-black text-[11px] uppercase tracking-widest rounded-full shadow-[0_0_20px_rgba(244,63,94,0.3)] transition-all active:scale-95"
               >
-                Reject <span className="ml-2 text-[8px] opacity-70 border border-white/20 px-1 rounded">R</span>
+                Reject <span className="ml-2 text-[8px] opacity-70 border border-white/20 px-1 rounded">D</span>
               </button>
 
               <button
@@ -352,16 +355,6 @@ export default function App() {
           </>
         )}
       </main>
-
-      {/* Shortcuts Help Overlay */}
-      <div className="fixed top-8 right-8 flex flex-col gap-2 pointer-events-none">
-        <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-700/50 px-3 py-2 rounded-xl text-[9px] font-mono text-slate-400 shadow-lg">
-          <div className="flex justify-between gap-4"><span>PREV</span> <span className="text-white">←</span></div>
-          <div className="flex justify-between gap-4"><span>NEXT</span> <span className="text-white">→ / S</span></div>
-          <div className="flex justify-between gap-4"><span>APPROVE</span> <span className="text-white">A</span></div>
-          <div className="flex justify-between gap-4"><span>REJECT</span> <span className="text-white">R</span></div>
-        </div>
-      </div>
 
       {/* Image Preloader */}
       <div style={{ display: 'none', visibility: 'hidden', height: 0, width: 0, overflow: 'hidden' }} aria-hidden="true">

@@ -36,7 +36,10 @@ class ReviewUpdate(BaseModel):
     sample_name: str
     status: str  # "approved", "rejected", "pending"
     split: str
-
+#health check
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 @app.get("/samples")
 def get_samples(split: str = "train"):
     # Map 'valid' to 'test' folder if needed
@@ -92,3 +95,4 @@ def update_review(update: ReviewUpdate):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+#uvicorn webapp.backend.server:app --host 0.0.0.0 --port 8000 --reload
