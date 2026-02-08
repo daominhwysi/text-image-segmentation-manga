@@ -371,8 +371,8 @@ class DatasetGenerator:
 
 
 if __name__ == "__main__":
-    SOURCE_DATA = "resource/444-2/train"
-    FONT_DIR = "resource/fonts"
+    SOURCE_DATA = "resources/444-2/train"
+    FONT_DIR = "resources/fonts"
     EXPORT_DEST = "output/synthetic_dataset"
     TOTAL_SAMPLES = 50000
     # Take args as number of sample

@@ -5,7 +5,7 @@ import numpy as np
 from collections import defaultdict
 
 class PatchManager:
-    def __init__(self, patch_dir="output/bg_patches", split_ratio=0.8, seed=42):
+    def __init__(self, patch_dir="resources/bg_patches", split_ratio=0.8, seed=42):
         self.patch_dir = patch_dir
         self.split_ratio = split_ratio
 
@@ -15,7 +15,7 @@ class PatchManager:
                                if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 
         if not all_patch_files:
-            print(f"Warning: No patches found in {patch_dir}. Please run src/data/v1/cache_bg_patches.py first.")
+            print(f"Warning: No patches found in {patch_dir}. Please run src/scripts/cache_bg_patches.py first.")
             self.train_patches = []
             self.test_patches = []
             return

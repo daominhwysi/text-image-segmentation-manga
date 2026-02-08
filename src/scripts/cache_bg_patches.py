@@ -60,10 +60,10 @@ def extract_patches_from_image(img_path, label_path, output_dir, patch_size=512,
     return extracted_count
 
 def main():
-    dataset_root = "resource/Speech-bubble-6/train"
+    dataset_root = "resources/Speech-bubble-6/train"
     img_dir = os.path.join(dataset_root, "images")
     lbl_dir = os.path.join(dataset_root, "labels")
-    output_dir = "output/bg_patches"
+    output_dir = "resources/bg_patches"
 
     os.makedirs(output_dir, exist_ok=True)
 

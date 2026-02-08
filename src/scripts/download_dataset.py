@@ -4,7 +4,7 @@ from roboflow import Roboflow
 from huggingface_hub import hf_hub_download
 
 base_dir = os.getcwd()
-target_folder = os.path.join(base_dir, "resource")
+target_folder = os.path.join(base_dir, "resources")
 
 if not os.path.exists(target_folder):
     os.makedirs(target_folder)
