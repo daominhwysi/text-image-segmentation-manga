@@ -10,10 +10,11 @@ if not os.path.exists(target_folder):
     os.makedirs(target_folder)
 
 os.chdir(target_folder)
-rf = Roboflow(api_key="P3FPqjdT3M8cUVClBV2n")
-project = rf.workspace("dao-minh-uyi1j").project("444-8vbul")
-version = project.version(2)
-dataset = version.download("yolov12")
+
+rf = Roboflow(api_key="f01cbXEWTlXhJAuV2PVq")
+project = rf.workspace("dao-minh").project("speech-bubble-ibar9")
+version = project.version(6)
+dataset = version.download("yolo26")
 
 os.chdir(base_dir)
 file_path = hf_hub_download(

@@ -9,9 +9,9 @@ from src.data.v1.bg_manager import get_random_non_overlapping_roi
 from PIL import Image, ImageDraw
 from src.data.v1.text_render import generate_text_image
 from src.data.v1.augment_text import augment_output_image
-from src.data.openocr.det_infer import OpenOCRDetector
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import functools
+from src.automatic_review.infer import Reviewer
 
 
 def get_random_rgb_alpha():
@@ -98,7 +98,7 @@ def add_random_noise_to_bg(
 
 
 def generate_composited_sample(
-    dataset_root: str, text: str, font_path: str, FIXED_WIDTH=320, detector=None
+    dataset_root: str, text: str, font_path: str, FIXED_WIDTH=320, split="train"
 ):
     is_contrast_mode = random.random() < 0.9
     is_roi_bg = random.random() >= 0.25
@@ -168,7 +168,7 @@ def generate_composited_sample(
         )
     else:
         roi_background, _ = get_random_non_overlapping_roi(
-            dataset_root, roi_size=(target_roi_w, target_roi_h), detector=detector
+            dataset_root, roi_size=(target_roi_w, target_roi_h), split=split
         )
 
     if roi_background is None:
@@ -216,47 +216,28 @@ def generate_composited_sample(
     return final_bg, mask
 
 
-_worker_detector = None
-
-
-def get_detector(model_path):
-    global _worker_detector
-    if _worker_detector is None and model_path:
-        _worker_detector = OpenOCRDetector(model_path)
-    return _worker_detector
-
-
 def generate_single_task(task_info):
     (
         dataset_root,
         text,
         font_path,
-        output_dir,
         split,
         i,
-        detector_model_path,
     ) = task_info
-
-    detector = get_detector(detector_model_path)
 
     result = generate_composited_sample(
         dataset_root=dataset_root,
         text=text,
         font_path=font_path,
         FIXED_WIDTH=256,
-        detector=detector,
+        split=split,
     )
 
     if result is None:
-        return False
+        return None
 
     img, mask = result
-    file_id = f"sample_{i:06d}"
-    img.save(
-        os.path.join(output_dir, split, "images", f"{file_id}.jpg"), quality=95
-    )
-    mask.save(os.path.join(output_dir, split, "masks", f"{file_id}.png"))
-    return True
+    return img, mask, split
 
 
 def get_random_word_count(mu, sigma):
@@ -270,7 +251,6 @@ class DatasetGenerator:
         dataset_root,
         font_dir,
         output_dir,
-        ocr_det_model=None,
     ):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
@@ -278,11 +258,6 @@ class DatasetGenerator:
         self.train_fonts, self.test_fonts = initialize_font_samplers(
             font_dir, split_ratio=0.8
         )
-        if ocr_det_model:
-            print("Initializing Background Cleaning Detector (OpenOCR)...")
-            self.detector = OpenOCRDetector(ocr_det_model)
-        else:
-            self.detector = None
 
     def _prepare_dirs(self):
         for split in ["train", "test"]:
@@ -311,63 +286,88 @@ class DatasetGenerator:
         chosen_terminator = random.choices(terminators, weights=weights)[0]
         return text.capitalize() + chosen_terminator
 
-    def generate(self, n_samples=100, train_ratio=0.8, num_workers=4):
+    def generate(self, n_samples=100, train_ratio=0.8, num_workers=4, batch_size=128):
         self._prepare_dirs()
+        reviewer = Reviewer()
+
         n_train = int(n_samples * train_ratio)
+        n_test = n_samples - n_train
 
-        print(f"Generating {n_samples} samples with {num_workers} workers...")
+        target_counts = {"train": n_train, "test": n_test}
+        current_counts = {"train": 0, "test": 0}
 
-        tasks = []
-        for i in range(n_samples):
-            if i < n_train:
-                split = "train"
-                font_sampler = self.train_fonts
-            else:
-                split = "test"
-                font_sampler = self.test_fonts
+        pbar = tqdm(total=n_samples, desc="Generating qualified samples")
 
-            font_path = font_sampler.get_random_font()
-            text = self.get_sentence()
-
-            retry_count = 0
-            while (
-                font_path
-                and not check_font_chars_support(font_path, text)
-                and retry_count < 10
-            ):
-                font_path = font_sampler.get_random_font()
-                text = self.get_sentence()
-                retry_count += 1
-
-            if not font_path or not check_font_chars_support(font_path, text):
-                continue
-
-            # We pass the path to the detector model instead of the detector instance itself
-            # because the ONNX session is not pickleable.
-            detector_path = (
-                self.detector.model_path if self.detector else None
-            )
-
-            tasks.append(
-                (
-                    self.dataset_root,
-                    text,
-                    font_path,
-                    self.output_dir,
-                    split,
-                    i,
-                    detector_path,
-                )
-            )
-
-        results_count = 0
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(generate_single_task, task) for task in tasks]
-            for _ in tqdm(as_completed(futures), total=len(tasks)):
-                if _.result():
-                    results_count += 1
+            while current_counts["train"] < target_counts["train"] or current_counts["test"] < target_counts["test"]:
+                # Determine how many more we need for this batch
+                needed_train = target_counts["train"] - current_counts["train"]
+                needed_test = target_counts["test"] - current_counts["test"]
 
-        print(f"Finished. Generated {results_count} samples.")
+                # We can generate a bit more than needed to account for rejection, but let's stick to batch_size
+                current_batch_size = min(batch_size, needed_train + needed_test)
+                if current_batch_size <= 0:
+                    break
+
+                tasks = []
+                for _ in range(current_batch_size):
+                    if current_counts["train"] < target_counts["train"]:
+                        split = "train"
+                        font_sampler = self.train_fonts
+                    else:
+                        split = "test"
+                        font_sampler = self.test_fonts
+
+                    font_path = font_sampler.get_random_font()
+                    text = self.get_sentence()
+
+                    retry_count = 0
+                    while font_path and not check_font_chars_support(font_path, text) and retry_count < 10:
+                        font_path = font_sampler.get_random_font()
+                        text = self.get_sentence()
+                        retry_count += 1
+
+                    if not font_path or not check_font_chars_support(font_path, text):
+                        continue
+
+                    tasks.append((self.dataset_root, text, font_path, split, 0)) # i=0 as it's not used yet
+
+                if not tasks:
+                    continue
+
+                futures = [executor.submit(generate_single_task, task) for task in tasks]
+
+                batch_results = []
+                for f in as_completed(futures):
+                    res = f.result()
+                    if res:
+                        batch_results.append(res)
+
+                if not batch_results:
+                    continue
+
+                # Review batch
+                imgs = [r[0] for r in batch_results]
+                masks = [r[1] for r in batch_results]
+                splits = [r[2] for r in batch_results]
+
+                probs = reviewer.predict(imgs, masks)
+
+                # Save approved samples
+                for img, mask, split, prob in zip(imgs, masks, splits, probs):
+                    if prob > 0.5:
+                        if current_counts[split] < target_counts[split]:
+                            idx = current_counts[split]
+                            file_id = f"sample_{idx:06d}"
+
+                            img.save(os.path.join(self.output_dir, split, "images", f"{file_id}.jpg"), quality=95)
+                            mask.save(os.path.join(self.output_dir, split, "masks", f"{file_id}.png"))
+
+                            current_counts[split] += 1
+                            pbar.update(1)
+
+        pbar.close()
+        print(f"Finished. Generated {current_counts['train']} train and {current_counts['test']} test samples.")
 
 
 if __name__ == "__main__":
@@ -377,11 +377,9 @@ if __name__ == "__main__":
     TOTAL_SAMPLES = 50000
     # Take args as number of sample
     TOTAL_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 else TOTAL_SAMPLES
-    DET_MODEL = "checkpoints/openocr_det_model.onnx"
     generator = DatasetGenerator(
         dataset_root=SOURCE_DATA,
         font_dir=FONT_DIR,
         output_dir=EXPORT_DEST,
-        ocr_det_model=DET_MODEL,
     )
     generator.generate(n_samples=TOTAL_SAMPLES)
