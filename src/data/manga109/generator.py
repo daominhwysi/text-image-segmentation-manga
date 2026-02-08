@@ -28,7 +28,8 @@ def extract_rois(
     train_ratio=0.9,
     target_size=256,
     max_original_crop_size=640,
-    zoom_range=(1.2, 2.0),
+    zoom_range=(1.1, 2.0),
+    jitter_ratio=0.25,
     num_pages=None
 ):
     os.makedirs(output_root, exist_ok=True)
@@ -100,23 +101,36 @@ def extract_rois(
                 bw = int(w_norm * w_orig)
                 bh = int(h_norm * h_orig)
 
+                # Target bbox pixel coords
+                bx1, by1 = cx - bw // 2, cy - bh // 2
+                bx2, by2 = bx1 + bw, by1 + bh
+
                 # Determine crop size (square, centered on bbox)
+                # Zoom by ratio: target occupies some ratio of the crop
                 zoom = random.uniform(*zoom_range)
                 crop_size = int(max(bw, bh) * zoom)
 
-                # Constraint: max 640px
+                # Constraint: max size
                 if crop_size > max_original_crop_size:
                     crop_size = max_original_crop_size
 
-                # Calculate crop bounds
-                x1 = cx - crop_size // 2
-                y1 = cy - crop_size // 2
+                # Ensure crop_size is at least the bbox size
+                crop_size = max(crop_size, bw, bh)
+
+                # Add some random jitter
+                # Jitter can move the center by up to (crop_size - bbox_size) / 2
+                max_jitter_x = max(0, (crop_size - bw) // 2)
+                max_jitter_y = max(0, (crop_size - bh) // 2)
+
+                jitter_val = jitter_ratio
+                jx = random.randint(int(-max_jitter_x * jitter_val), int(max_jitter_x * jitter_val))
+                jy = random.randint(int(-max_jitter_y * jitter_val), int(max_jitter_y * jitter_val))
+
+                # Final crop bounds
+                x1 = (cx + jx) - crop_size // 2
+                y1 = (cy + jy) - crop_size // 2
                 x2 = x1 + crop_size
                 y2 = y1 + crop_size
-
-                # Padding handling (if crop goes outside image)
-                # We'll use reflection padding for the image and zero padding for the mask
-                # But it's easier to just adjust the bounds and crop, then pad if needed
 
                 def safe_crop(data, bounds, pad_value=0):
                     x1, y1, x2, y2 = bounds
@@ -142,10 +156,38 @@ def extract_rois(
 
                     return crop
 
-                # For image, we can use reflect padding if we want more natural backgrounds
-                # For now let's stick to black padding as it's safer for segmentation training
                 roi_img = safe_crop(img, (x1, y1, x2, y2), pad_value=0)
                 roi_mask = safe_crop(binary_mask, (x1, y1, x2, y2), pad_value=0)
+
+                # Edge Noise Mitigation:
+                # Remove connected components in mask that touch the border but don't overlap target bbox
+                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(roi_mask, connectivity=8)
+
+                # Define "target area" in local crop coords
+                # The target bbox is at [bx1, by1, bx2, by2] in global coords
+                # In local coords: [bx1 - x1, by1 - y1, bx2 - x1, by2 - y1]
+                lbx1, lby1 = bx1 - x1, by1 - y1
+                lbx2, lby2 = bx2 - x1, by2 - y1
+
+                clean_mask = np.zeros_like(roi_mask)
+                for i in range(1, num_labels): # skip background 0
+                    x, y, w, h, area = stats[i]
+
+                    # Check if touches border
+                    touches_border = (x == 0 or y == 0 or (x + w) >= crop_size or (y + h) >= crop_size)
+
+                    # Check if overlaps target bbox significantly
+                    # Component bounding box: [x, y, x+w, y+h]
+                    overlap = not (x > lbx2 or (x + w) < lbx1 or y > lby2 or (y + h) < lby1)
+
+                    if touches_border and not overlap:
+                        # This is likely a half-cut neighbor, ignore it
+                        continue
+
+                    # Keep it
+                    clean_mask[labels == i] = 255
+
+                roi_mask = clean_mask
 
                 # Resize to target size (256x256)
                 roi_img_resized = cv2.resize(roi_img, (target_size, target_size), interpolation=cv2.INTER_LANCZOS4)
