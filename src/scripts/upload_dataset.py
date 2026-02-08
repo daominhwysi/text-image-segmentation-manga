@@ -27,4 +27,4 @@ def create_split(split_name):
 dataset = DatasetDict({"train": create_split("train"), "test": create_split("test")})
 
 # 3. Push to Hub
-dataset.push_to_hub("Daominhwysi/manga-text-256-v3")
+dataset.push_to_hub("Daominhwysi/synthetic-manga-text-50k")
