@@ -2,11 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
-from ultralytics import YOLO # Ensure ultralytics is installed
-
-# ==========================================
-# COMMON COMPONENTS
-# ==========================================
 
 class SCSEModule(nn.Module):
     def __init__(self, ch, re=16):
@@ -209,153 +204,13 @@ class Unet_MobileNetV4(nn.Module):
 
 
 
-class Unet_YOLO(nn.Module):
-    def __init__(self, num_classes=2):
-        super().__init__()
+# if __name__ == "__main__":
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     model = Unet_YOLO_Medium(num_classes=2).to(device)
 
-        # 1. Load Backbone (YOLOv11n structure assumed based on your layers)
-        yolo_base = YOLO('yolo26n.pt').model.model
-
-        self.stage1 = yolo_base[0:3]   # P2 (1/4)
-        self.stage2 = yolo_base[3:5]   # P3 (1/8)
-        self.stage3 = yolo_base[5:7]   # P4 (1/16)
-        self.stage4 = yolo_base[7:11]  # P5 (1/32)
-
-        self.aspp = ASPP(in_channels=256, out_channels=256)
-
-        # 2. Decoder Layers
-        self.up1 = DecoderBlock(in_channels=256, skip_channels=128, out_channels=128) # -> 1/16
-        self.up2 = DecoderBlock(in_channels=128, skip_channels=128, out_channels=64)  # -> 1/8
-        self.up3 = DecoderBlock(in_channels=64, skip_channels=64, out_channels=32)    # -> 1/4
-
-        # 3. Final Main Head
-        self.final_up = nn.Sequential(
-            nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True),
-            nn.Conv2d(32, 16, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, num_classes, kernel_size=1)
-        )
-
-        # 4. Deep Supervision Heads (Auxiliary)
-        self.ds_head1 = nn.Conv2d(128, num_classes, kernel_size=1) # From 1/16
-        self.ds_head2 = nn.Conv2d(64, num_classes, kernel_size=1)  # From 1/8
-        self.ds_head3 = nn.Conv2d(32, num_classes, kernel_size=1)  # From 1/4
-
-    def freeze_backbone(self):
-        for m in [self.stage1, self.stage2, self.stage3, self.stage4]:
-            for param in m.parameters():
-                param.requires_grad = False
-        print("Backbone Freezed")
-
-    def unfreeze_backbone(self):
-        for param in self.parameters():
-            param.requires_grad = True
-        print("Model Fully Unfreezed")
-
-    def forward(self, x):
-        input_size = x.shape[-2:]
-
-        # Encoder
-        p2 = self.stage1(x)
-        p3 = self.stage2(p2)
-        p4 = self.stage3(p3)
-        p5 = self.stage4(p4)
-
-        # Decoder
-        d1 = self.up1(self.aspp(p5), p4)
-        d2 = self.up2(d1, p3)
-        d3 = self.up3(d2, p2)
-
-        main_out = self.final_up(d3)
-
-        if self.training:
-            # Return main output + auxiliary outputs upsampled to input size
-            return main_out, \
-                   F.interpolate(self.ds_head3(d3), size=input_size, mode='bilinear', align_corners=True), \
-                   F.interpolate(self.ds_head2(d2), size=input_size, mode='bilinear', align_corners=True), \
-                   F.interpolate(self.ds_head1(d1), size=input_size, mode='bilinear', align_corners=True)
-        return main_out
-
-class Unet_YOLO_Medium(nn.Module):
-    def __init__(self, model_variant='yolo26m.pt', num_classes=2):
-        super().__init__()
-
-        yolo_base = YOLO(model_variant).model.model
-
-        self.stage1 = yolo_base[0:3]
-        self.stage2 = yolo_base[3:5]
-        self.stage3 = yolo_base[5:7]
-        self.stage4 = yolo_base[7:11]
-
-        # Dynamic channel detection for Medium version
-        ch_p2 = self._get_out_channels(self.stage1, 3)
-        ch_p3 = self._get_out_channels(self.stage2, ch_p2)
-        ch_p4 = self._get_out_channels(self.stage3, ch_p3)
-        ch_p5 = self._get_out_channels(self.stage4, ch_p4)
-
-        self.aspp = ASPP(in_channels=ch_p5, out_channels=ch_p5)
-
-        # Decoder
-        self.up1 = DecoderBlock(in_channels=ch_p5, skip_channels=ch_p4, out_channels=ch_p4)
-        self.up2 = DecoderBlock(in_channels=ch_p4, skip_channels=ch_p3, out_channels=ch_p3 // 2)
-        self.up3 = DecoderBlock(in_channels=ch_p3 // 2, skip_channels=ch_p2, out_channels=ch_p2 // 2)
-
-        # Main Head
-        self.final_up = nn.Sequential(
-            nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True),
-            nn.Conv2d(ch_p2 // 2, ch_p2 // 4, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(ch_p2 // 4, num_classes, kernel_size=1)
-        )
-
-        # Deep Supervision Heads
-        self.ds_head1 = nn.Conv2d(ch_p4, num_classes, kernel_size=1)
-        self.ds_head2 = nn.Conv2d(ch_p3 // 2, num_classes, kernel_size=1)
-        self.ds_head3 = nn.Conv2d(ch_p2 // 2, num_classes, kernel_size=1)
-
-    def _get_out_channels(self, layer, in_ch):
-        dummy_input = torch.zeros(1, in_ch, 64, 64)
-        with torch.no_grad():
-            output = layer(dummy_input)
-        return output.shape[1]
-
-    def freeze_backbone(self):
-        for m in [self.stage1, self.stage2, self.stage3, self.stage4]:
-            for param in m.parameters():
-                param.requires_grad = False
-        print("Medium Backbone Freezed")
-
-    def unfreeze_backbone(self):
-        for param in self.parameters():
-            param.requires_grad = True
-
-    def forward(self, x):
-        input_size = x.shape[-2:]
-
-        p2 = self.stage1(x)
-        p3 = self.stage2(p2)
-        p4 = self.stage3(p3)
-        p5 = self.stage4(p4)
-
-        d1 = self.up1(self.aspp(p5), p4)
-        d2 = self.up2(d1, p3)
-        d3 = self.up3(d2, p2)
-
-        main_out = self.final_up(d3)
-
-        if self.training:
-            return main_out, \
-                   F.interpolate(self.ds_head3(d3), size=input_size, mode='bilinear', align_corners=True), \
-                   F.interpolate(self.ds_head2(d2), size=input_size, mode='bilinear', align_corners=True), \
-                   F.interpolate(self.ds_head1(d1), size=input_size, mode='bilinear', align_corners=True)
-        return main_out
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = Unet_YOLO_Medium(num_classes=2).to(device)
-
-    # Standard input size for this backbone
-    dummy_input = torch.randn(1, 3, 256, 256).to(device)
-    model.eval()
-    with torch.no_grad():
-        output = model(dummy_input)
-    print(f"Output shape: {output.shape}") # Expected: [1, 2, 256, 256]
+#     # Standard input size for this backbone
+#     dummy_input = torch.randn(1, 3, 256, 256).to(device)
+#     model.eval()
+#     with torch.no_grad():
+#         output = model(dummy_input)
+#     print(f"Output shape: {output.shape}") # Expected: [1, 2, 256, 256]

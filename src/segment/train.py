@@ -43,15 +43,16 @@ def get_transforms(split="train"):
                 scale=(0.8, 1.2),           # Replaces scale_limit=0.2
                 rotate=(-15, 15),           # Replaces rotate_limit=15
                 translate_percent=(-0.1, 0.1), # Replaces shift_limit=0.1
-                mask_interpolation=cv2.INTER_LINEAR,
                 p=0.7
             ),
 
             # 2. Distortion (Parameters updated for newer Albumentations)
             A.OneOf([
-                A.GridDistortion(num_steps=5, distort_limit=0.3, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
-                A.ElasticTransform(alpha=1, sigma=50, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
-                A.OpticalDistortion(distort_limit=0.2, mask_interpolation=cv2.INTER_LINEAR, p=1.0),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=1.0),
+                # Removed 'alpha_affine', strictly using elastic params
+                A.ElasticTransform(alpha=1, sigma=50, p=1.0),
+                # Removed 'shift_limit', only distort_limit is needed
+                A.OpticalDistortion(distort_limit=0.2, p=1.0),
             ], p=0.3),
 
             # 3. Pixel-level Augmentations
@@ -85,7 +86,8 @@ class TextSegmentationDataset(Dataset):
         return len(self.image_names)
 
     def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.image_names[idx])
+        img_name = self.image_names[idx] # Store filename
+        img_path = os.path.join(self.img_dir, img_name)
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -106,8 +108,7 @@ class TextSegmentationDataset(Dataset):
         # Add channel dimension
         mask = mask.unsqueeze(0)
 
-        return image, mask
-
+        return image, mask, img_name
 
 # ==========================================
 # 3. LOSS & TRAINING
@@ -200,7 +201,7 @@ def train_model():
         epoch_loss = 0
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS_TOTAL}")
 
-        for imgs, masks in loop:
+        for imgs, masks, _ in loop:
             imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
 
             optimizer.zero_grad()
@@ -228,7 +229,7 @@ def train_model():
         ema.module.eval() # Ensure EMA is in eval mode (BN/Dropout)
 
         with torch.no_grad():
-            for imgs, masks in val_loader:
+            for imgs, masks, _ in val_loader:
                 imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
                 masks_long = (masks > 0.5).long()
 
@@ -252,7 +253,6 @@ def train_model():
         print(f"   > Regular mIoU: {miou_reg:.4f}")
         print(f"   > EMA mIoU:     {miou_ema:.4f}")
 
-        # Save based on EMA performance (usually superior)
         if miou_ema > best_miou_ema:
             best_miou_ema = miou_ema
             torch.save({
