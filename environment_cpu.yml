@@ -24,3 +24,4 @@ dependencies:
       - openocr-python
       - onnxruntime
       - ultralytics
+      - timm

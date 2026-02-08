@@ -24,3 +24,4 @@ dependencies:
       - numpy
       - transformers
       - ultralytics
+      - timm
