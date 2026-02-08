@@ -8,10 +8,12 @@ This project provides a robust pipeline for **text segmentation** and **OCR** in
 ## 🚀 Key Features
 
 *   **Synthetic Data Generation (v1)**: Create large-scale datasets by compositing realistic text onto background images with advanced augmentations and background ROI management.
+    * **YOLO format bounding box refinement**: Use trained segmentation models to refine YOLO format bounding boxes.
+    * **Manual Review Webapp**: A modern React + FastAPI tool for manual dataset review, featuring rapid keyboard-driven approval/rejection.
+    * **review_sample_classifier**: A classifier model trained on a small subset of manually reviewed data to assist in the review process.
 *   **Modern Segmentation Architectures**: Support for high-performance U-Net backbones:
     *   **EfficientViT-B2** for state-of-the-art accuracy.
     *   **MobileNetV4** for a balance of speed and performance.
-*   **OpenOCR Integration**: Standalone inference scripts for text detection and recognition using OpenOCR ONNX models.
 *   **Advanced Training Techniques**:
     *   **Deep Supervision**: Multi-scale loss integration for stable convergence.
     *   **Mixed Precision**: Cuda-optimized training using `torch.amp`.
@@ -39,11 +41,6 @@ This project provides a robust pipeline for **text segmentation** and **OCR** in
 │   │   ├── train.py           # Training script
 │   │   └── test.py            # Inference and evaluation
 │   └── validate.py            # Validation utilities
-├── checkpoints/               # Model weights and ONNX models
-├── resource/                  # Base images, fonts, and keys
-├── scripts/                   # Utility scripts
-└── environment_cuda.yml       # Conda environment config
-```
 
 ---
 
