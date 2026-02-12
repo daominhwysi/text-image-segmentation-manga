@@ -3,7 +3,7 @@ from glob import glob
 from datasets import Dataset, DatasetDict, Image
 
 # 1. Define paths (adjust folder name if necessary)
-base_path = "output/synthetic_dataset"
+base_path = "output/manga109_roi_text_seg"
 
 
 def create_split(split_name):
@@ -27,4 +27,4 @@ def create_split(split_name):
 dataset = DatasetDict({"train": create_split("train"), "test": create_split("test")})
 
 # 3. Push to Hub
-dataset.push_to_hub("Daominhwysi/synthetic-manga-text-50k")
+dataset.push_to_hub("daominhwysi/jp_manga_text_256")
