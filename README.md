@@ -1,7 +1,7 @@
 # Text-Image Segmentation for Manga
 [![Dataset on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-md.svg)](https://huggingface.co/collections/Daominhwysi/manga-text-seg)
 
-<!-- [![Model on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md-dark.svg)](https://huggingface.co/models) -->
+[![Model on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md-dark.svg)](https://huggingface.co/daominhwysi/mobilenet-manga-text-seg)
 
 This project provides a robust pipeline for **text segmentation** and **OCR** in images, specifically tailored for manga. It includes tools for generating high-quality synthetic datasets, training state-of-the-art segmentation models (U-Net variants with modern backbones), and performing inference with OpenOCR.
 
