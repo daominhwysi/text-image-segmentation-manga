@@ -5,7 +5,7 @@
 
 This project provides a robust pipeline for **text segmentation** in images, specifically tailored for manga. It includes tools for generating high-quality synthetic datasets, training state-of-the-art segmentation models (U-Net variants with modern backbones.
 
-| Visualization samples |
+| qualitative result of model performance in the wild |
 |----------|
 | <img width="552" height="42" alt="res_2" src="https://github.com/user-attachments/assets/396b3b6a-ac96-4ec5-8e6f-b49231d59a75" /> |
 | <img width="969" height="364" alt="res_3" src="https://github.com/user-attachments/assets/31eae636-827b-4b87-a55f-fb535222c99d" /> |
